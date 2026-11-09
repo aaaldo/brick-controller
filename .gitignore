@@ -1,0 +1,11 @@
+# Rust
+/target/
+/dist/
+
+# Logs et fichiers locaux
+*.log
+.DS_Store
+
+# Éditeurs
+.idea/
+.vscode/
