@@ -9,6 +9,7 @@ open-source tools. Thank you to everyone below.
 | Work | License | What Padpod uses | Where |
 |---|---|---|---|
 | [Nunito](https://github.com/googlefonts/nunito), by The Nunito Project Authors | SIL Open Font License 1.1 | The interface font, subset | `crates/brick/assets/` (with `OFL.txt`) |
+| [Apostrophe](https://github.com/Helaas/Apostrophe), by Helaas | MIT | NextUI layout metrics and widget behaviour used as the design reference | `apps/brick-controller/src/ui.rs` |
 
 The DualShock 4 and Xbox Wireless Controller descriptors in
 `apps/padpod/src/ds4.rs` and `apps/padpod/src/xbox.rs` are what those

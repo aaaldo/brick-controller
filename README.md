@@ -15,24 +15,40 @@ installed on the host.
 - Standard Bluetooth HID gamepad: no host driver.
 - D-pad, A/B/X/Y, L1/L2/R1/R2, Start, Select and Menu.
 - Start and Select are passed to the host as normal gamepad buttons.
-- **F1** opens the settings screen.
-- **F2** opens a real-time input monitor. Every press and release, D-pad
-  direction, trigger value and stick movement is listed; the list scrolls so
-  the newest entry is always at the bottom. Only **F2** returns to the
-  controller view.
-- **F1+F2** held for three seconds quits the app; the footer says
-  "keep holding to quit…" while both are held.
-- The settings screen lists paired hosts. **A** connects a disconnected host or
-  disconnects the connected one; **F2** switches the selected host between the
-  PC and Xbox identities. With no paired host, a **Next pairing** row chooses
-  the identity the next host will see.
-- **MENU** tap sends Home/Guide.
+- The **Devices** screen is the app's home and is shown at launch. It always
+  lists the paired hosts, even while one is connected, followed by **Pair a new
+  device**. **B** quits the app from the Devices screen.
+- **F1** opens the Devices screen from the controller view. **F1+F2** held for 1.5 s
+  opens it too; gamepad input is neutralised while both keys are held.
+- Opening Devices stops the active link or pairing attempt. Nothing connects
+  automatically at launch or after returning to Devices: choose a host and
+  press **Connect**, or open **Pair a new device**.
+- Inside the Devices screen, D-pad moves, **A** connects the selected host (or
+  opens **Pair a new device**) and **X** forgets it. In a sub-screen, B goes
+  back, A selects; on the Devices screen, B quits. F1 is a Back alias and F2 a
+  Select alias.
+- Forgetting a host asks for confirmation. The PC/Xbox controller type is
+  chosen only while pairing a new host, not for an already paired one.
+- The controller view shows the host, the profile, and the recent button and
+  axis events. The input monitor is merged into this view.
+- The status bar shows the time, Bluetooth, Wi-Fi and battery state, using the
+  nextval colours and the NextUI font when they are available.
+- After a host connects, the panel switches off after 10 seconds while the
+  gamepad keeps working. Hold **F1** or **F2** to switch it back on; that hold
+  does not trigger the key's action.
+- **MENU** tap sends Home/Guide while the controller view is active.
 - Rumble in Xbox mode when the host sends output reports; the PC profile has
   no rumble output report.
-- The controller view is shown only while a host is connected. Without a
-  connection, the app stays on the settings screen.
-- Reconnects to the last host with the identity chosen for it.
-- Clean restore of NextUI's Bluetooth stack when the app exits.
+- Quit is immediate from the Devices screen with **B**. There is no quit row, no
+  confirmation dialog and no destructive quit chord.
+- Connections are manual: the app never pages a saved host at launch, and the
+  last host's identity is only used when it is explicitly connected.
+- Runs the CPU governor in `powersave` and draws no frames while the panel is
+  off, to keep battery use low.
+- Clean restore of NextUI's Bluetooth stack, panel brightness and mixer
+  settings when the app exits.
+- Only one instance runs at a time: launching the Pak again stops the previous
+  session and starts a fresh one.
 
 ## Requirements
 
@@ -64,22 +80,27 @@ Use the **bottom USB-C port** for ADB. The top port is a USB host port.
 ## Use
 
 1. Turn Bluetooth on in NextUI.
-2. Open **Brick Controller** from Tools.
-3. On the host, open Bluetooth settings and pair with the name shown on the
-   Brick (`Brick Controller` by default).
-4. Press **F1** for settings; **F2** shows the input monitor.
-5. In settings, use the D-pad to select a host, **A** to connect/disconnect,
-   and **F2** to switch that host between PC and Xbox. When a host is
-   connected, **F1** returns to the controller view; without a host the
-   settings screen stays up.
-6. Tap **MENU** to send Home/Guide. Hold **F1+F2** for three seconds to quit.
+2. Open **Brick Controller** from Tools. The **Devices** screen is the home
+   screen and does not connect to a host on its own.
+3. To pair a new host, select **Pair a new device**, then open Bluetooth
+   settings on the host and pair with the name shown on the Brick (`Brick
+   Controller` by default).
+4. To use an already paired host, select it and press **Connect**. After the
+   link is established, the controller view shows the host, the profile and the
+   recent input events. The panel switches off after 10 seconds. Hold **F1** or
+   **F2** to light it again.
+5. Press **F1**, or hold **F1+F2** for 1.5 s, to open the Devices screen; the
+   current link or pairing attempt is stopped. Press **A** to connect the
+   selected host or **X** to forget it after confirming. Press **B** in the
+   Devices screen to quit.
+6. Tap **MENU** on the controller view to send Home/Guide.
 
 Start and Select are not used by the app; they reach the host as normal gamepad
-buttons.
+buttons. While the Devices screen or a sub-screen is open, gamepad input is kept away from the host.
 
-## Xbox and PC profiles
+## Xbox and PC controller types
 
-Each host has its own identity, chosen with **F2** on the settings screen:
+The identity is chosen when pairing a new host:
 
 - **PC** is a generic HID gamepad. It works with Windows, macOS,
   Linux/SteamOS, Android and iPadOS, and is the recommended default.
@@ -88,13 +109,13 @@ Each host has its own identity, chosen with **F2** on the settings screen:
   iPadOS and Android. It also reads the host's rumble output report and drives
   the handheld motor.
 
-A host remembers the controller identity it first paired with. After changing a
-host from PC to Xbox or back, remove the old pairing on the host and pair again.
-Changing the profile of the host currently in use also forgets that pairing on
-the Brick, restarts Bluetooth with the new identity, keeps the settings screen
-open and waits for a fresh pairing. Hosts that are not currently connected keep
-their entry; forget them on the host before connecting them with their new
-profile.
+Open **Pair a new device**, press **X** to choose the controller type, then pair
+from the host. Each host keeps the identity it first paired with, and the Brick
+uses it again when that host is connected.
+
+The controller type of an already paired host is not editable from Devices. To
+change it, forget the host on both sides, choose the other type in the pairing
+screen and pair again.
 
 ## Limitations
 
@@ -126,6 +147,16 @@ or run:
 ```sh
 /mnt/SDCARD/.system/tg5040/etc/bluetooth/bt_init.sh start
 ```
+
+If the panel remains dark after a crash or a forced exit, hold **F1** or
+**F2** to wake it. `launch.sh` also restores the saved brightness and runs
+`syncsettings.elf` on exit; running
+
+```sh
+/mnt/SDCARD/.system/tg5040/bin/syncsettings.elf
+```
+
+restores NextUI's own brightness and volume settings.
 
 ## Build
 

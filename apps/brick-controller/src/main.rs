@@ -5,11 +5,14 @@
 //!
 //! Two identities: a generic PC gamepad, and an Xbox Wireless Controller for
 //! XInput. The choice is kept per host and gives the host an identity it
-//! already knows. The screen says what state the link is in and lights each
-//! control as it is pressed; it dims itself once a host is connected.
+//! already knows. The screen follows NextUI's theme and layout: a Menu for
+//! pairing and host settings, and a controller view that shows the link state
+//! and recent input events. After a host connects the panel can switch off
+//! while reports keep flowing, until a function key is held.
 
 mod bluez;
 use brick::canvas;
+mod display;
 mod hid;
 mod l2cap;
 mod pad;
@@ -17,10 +20,11 @@ mod pad;
 use brick::png;
 mod rumble;
 mod sdp;
+mod ui;
 mod xbox;
 use brick::text;
 
-use canvas::{Canvas, Rgb};
+use canvas::Canvas;
 use l2cap::{Addr, Channel, Listener};
 use std::collections::HashMap;
 use std::os::unix::io::AsRawFd;
@@ -30,22 +34,26 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use text::Fonts;
+use ui::{Modal, Row, StatusInfo, Theme, View};
 
 const NAME: &str = "Brick Controller";
-/// Who made it, and where it lives: on screen, so the credit travels with
-/// the app. The Padpod credit is required by its license.
-const PADPOD_CREDIT: &str = "Padpod by ligt";
-const HOME_PAGE: &str = "github.com/duyquang6/padpod";
 /// The release, as `package.sh` builds it; "dev" for any other build.
 const VERSION: &str = match option_env!("BRICK_CONTROLLER_VERSION") {
     Some(v) => v,
     None => "0.1.0",
 };
 const DATA_DIR: &str = "/mnt/SDCARD/.userdata/tg5040/brick-controller";
-const THEME_FONT: &str = "/mnt/SDCARD/Themes/SPRUCE/nunwen.ttf";
 
-/// Holding F1 and F2 together this long quits.
-const QUIT_CHORD_HOLD: Duration = Duration::from_secs(3);
+/// Holding F1 and F2 together this long opens the menu without sending any
+/// gamepad input to the host.
+const MENU_CHORD_HOLD: Duration = Duration::from_millis(1500);
+/// After a host connects, the countdown stays visible this long, then the
+/// panel goes dark until a function key is held.
+const SCREEN_OFF_AFTER: Duration = Duration::from_secs(10);
+/// How long F1 or F2 must be held to wake a dark panel.
+const WAKE_HOLD: Duration = Duration::from_millis(700);
+/// Idle poll interval while the panel is off; nothing needs animation then.
+const SCREEN_OFF_POLL: i32 = 250;
 /// Between attempts to reach the host we were last paired with.
 const RECONNECT_EVERY: Duration = Duration::from_secs(4);
 /// How long after starting or losing the link to keep at that pace...
@@ -60,41 +68,6 @@ const RECONNECT_SLOWLY: Duration = Duration::from_secs(30);
 /// DualShock 4 to a PS4, sends one report every 10 ms and never more; so does
 /// Padpod.
 const REPORT_GAP: Duration = Duration::from_millis(10);
-// The look follows spruce's SPRUCE theme (Gruvbox), as the handheld's other
-// native apps do: black, cream text, an orange accent.
-const BG: Rgb = Rgb(0, 0, 0);
-/// The title, and the rule under it.
-const TITLE: Rgb = Rgb(0xEB, 0xDB, 0xB2);
-const FG: Rgb = Rgb(0xFB, 0xF1, 0xC7);
-/// Secondary text, still bright enough to read at a glance.
-const DIM: Rgb = Rgb(0xBD, 0xAE, 0x93);
-/// What is pressed, chosen or on.
-const ACCENT: Rgb = Rgb(0xD6, 0x5D, 0x0E);
-/// The menu's cursor: the accent, dimmed.
-const CURSOR: Rgb = Rgb(0x6B, 0x2F, 0x07);
-/// The rule under the title: the title, dimmed.
-const RULE: Rgb = Rgb(0x76, 0x6E, 0x59);
-const OK: Rgb = Rgb(0xB8, 0xBB, 0x26);
-const WARN: Rgb = Rgb(0xFA, 0xBD, 0x2F);
-const ERROR: Rgb = Rgb(0xFB, 0x49, 0x34);
-/// Every control's resting colour. The panel shows dark greys darker than a
-/// monitor does: at (40, 44, 56) on the body the D-pad and sticks could not
-/// be made out on the device.
-const CHIP: Rgb = Rgb(0x66, 0x5C, 0x54);
-/// A stick's cap, lighter than its well so where it points can be seen.
-const KNOB: Rgb = Rgb(0xBD, 0xAE, 0x93);
-const WELL: Rgb = Rgb(0x3C, 0x38, 0x36);
-
-// The layout: the title and a rule along the top, the content below, the
-// buttons' hints along the bottom.
-const LEFT: i32 = 28;
-const TITLE_BASELINE: i32 = 52;
-const TITLE_SIZE: f32 = 40.0;
-const RULE_Y: i32 = 70;
-const CONTENT_TOP: i32 = 116;
-const TEXT_SIZE: f32 = 28.0;
-const BOTTOM_BASELINE: i32 = 744;
-const HINT_SIZE: f32 = 26.0;
 
 fn data_dir() -> PathBuf {
     for key in ["BRICK_CONTROLLER_DATA", "PADPOD_DATA"] {
@@ -108,15 +81,6 @@ fn data_dir() -> PathBuf {
     PathBuf::from(DATA_DIR)
 }
 
-/// The Brick standard has no analog sticks; the Brick Pro and the Smart Pro do.
-/// NextUI passes the model in `DEVICE`, so the status screen can match the
-/// hardware without probing the input device.
-fn has_sticks() -> bool {
-    std::env::var("DEVICE")
-        .map(|device| device != "brick")
-        .unwrap_or(true)
-}
-
 /// The HID identity used with a host. A host remembers the controller type it
 /// paired with, so the choice is stored per host and applied when connecting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,6 +90,10 @@ enum Profile {
 }
 
 impl Profile {
+    /// Every controller type offered by the selection screen. Add future
+    /// identities here; the screen and its navigation are list-based.
+    const ALL: [Self; 2] = [Profile::Pc, Profile::Xbox];
+
     fn label(self) -> &'static str {
         match self {
             Profile::Pc => "PC",
@@ -276,19 +244,6 @@ struct Link {
     name: String,
 }
 
-#[derive(Clone)]
-enum Status {
-    Starting,
-    Failed(String),
-    /// `reconnecting` names the host being reconnected to.
-    Waiting {
-        reconnecting: Option<String>,
-    },
-    Connected {
-        name: String,
-    },
-}
-
 /// Keep trying to reach the host last paired with, while nothing is connected.
 /// A HID device is expected to reconnect on its own; a PC does not come
 /// looking for its gamepad.
@@ -357,13 +312,13 @@ impl Drop for StopOnDrop {
 }
 
 /// What the screen should show next.
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Frame {
-    profile: Profile,
-    status: Status,
-    state: hid::State,
-    chord_held: bool,
-    settings: Option<Settings>,
-    monitor: Option<InputMonitor>,
+    view: View,
+    status: StatusInfo,
+    modal: Option<Modal>,
+    /// Chord progress, quantised so an unchanged hold does not redraw.
+    hold: Option<u8>,
 }
 
 /// The screen, drawn on a thread of its own.
@@ -380,8 +335,9 @@ struct Renderer {
 }
 
 /// The shortest time between two frames. The screen is a status display; the
-/// gamepad is what has to be quick.
-const FRAME_EVERY: Duration = Duration::from_millis(33);
+/// gamepad is what has to be quick. Twenty frames a second keeps the pressed
+/// controls readable while leaving the CPU mostly to the HID loop.
+const FRAME_EVERY: Duration = Duration::from_millis(50);
 
 /// `gettid` is Linux-only; on a host build the process id is enough for the
 /// priority call, which only ever runs on the device anyway.
@@ -396,7 +352,7 @@ fn current_tid() -> i32 {
 }
 
 impl Renderer {
-    fn spawn(mut canvas: Canvas, mut fonts: Fonts) -> Self {
+    fn spawn(mut canvas: Canvas, mut fonts: Fonts, theme: Theme) -> Self {
         let slot: Arc<(Mutex<Option<Option<Frame>>>, std::sync::Condvar)> = Arc::default();
         let shared = Arc::clone(&slot);
         let thread = std::thread::spawn(move || {
@@ -415,31 +371,20 @@ impl Renderer {
                 let started = Instant::now();
                 match next {
                     None => {
-                        canvas.clear(Rgb(0, 0, 0));
+                        canvas.clear(theme.background);
                         let _ = canvas.flush();
                         return;
                     }
                     Some(frame) => {
-                        draw(
+                        ui::draw(
                             &mut canvas,
                             &mut fonts,
-                            frame.profile,
+                            &theme,
+                            &frame.view,
                             &frame.status,
-                            &frame.state,
-                            frame.chord_held,
+                            frame.modal.as_ref(),
+                            frame.hold.map(|step| step as f32 / 20.0),
                         );
-                        let connected = matches!(&frame.status, Status::Connected { .. });
-                        if let Some(settings) = frame.settings {
-                            draw_settings(
-                                &mut canvas,
-                                &mut fonts,
-                                &settings,
-                                connected,
-                                frame.chord_held,
-                            );
-                        } else if let Some(monitor) = frame.monitor {
-                            draw_input_monitor(&mut canvas, &mut fonts, &monitor, frame.chord_held);
-                        }
                         let _ = canvas.flush();
                         // A few, to know what a frame costs on the device.
                         drawn += 1;
@@ -486,6 +431,9 @@ fn main() {
     if std::env::args().nth(1).as_deref() == Some("restore") {
         bluez::restore_system_daemon();
         rumble::stop();
+        if let Err(e) = display::restore() {
+            eprintln!("display: could not restore the panel: {e}");
+        }
         return;
     }
     if let Err(e) = run() {
@@ -495,22 +443,34 @@ fn main() {
 }
 
 fn run() -> Result<(), String> {
+    eprintln!("brick-controller {VERSION}");
     let canvas = Canvas::open("/dev/fb0").map_err(|e| format!("framebuffer: {e}"))?;
-    let fonts = Fonts::load(&[THEME_FONT.to_string()]);
+    let theme = Theme::load();
+    let fonts = Fonts::load(&ui::font_paths());
     let mut pad = pad::Pad::open(&pad::pad_path()).map_err(|e| format!("pad: {e}"))?;
-    let screen = Renderer::spawn(canvas, fonts);
+    let screen = Renderer::spawn(canvas, fonts, theme);
     let mut profile = saved_host().map(profile_for).unwrap_or_else(last_profile);
-    let mut open_settings = false;
+    let mut start_in_menu = false;
+    // No host is reached until the user asks for it from Devices.
+    let mut connect = None;
     loop {
         save_last_profile(profile);
-        match session(profile, open_settings, &screen, &mut pad)? {
+        match session(profile, start_in_menu, connect, &screen, &mut pad)? {
             SessionOutcome::Quit => break,
-            SessionOutcome::SwitchProfile(next) => {
+            SessionOutcome::SwitchProfile {
+                profile: next,
+                connect: next_connect,
+            } => {
                 profile = next;
-                // A profile change comes from the settings screen; keep it
-                // there across the Bluetooth restart.
-                open_settings = true;
+                connect = next_connect;
                 eprintln!("profile: {}", profile.label());
+                // A profile change comes from the menu; reopen it across the
+                // Bluetooth restart.
+                start_in_menu = true;
+            }
+            SessionOutcome::Retry => {
+                connect = None;
+                start_in_menu = true;
             }
         }
     }
@@ -518,38 +478,39 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
-fn frame(profile: Profile, status: Status, state: hid::State, chord_held: bool) -> Frame {
-    Frame {
-        profile,
-        status,
-        state,
-        chord_held,
-        settings: None,
-        monitor: None,
-    }
-}
-
-/// The settings screen F1 opens: the paired hosts and their link state.
-/// Start and Select stay available to the host; this screen is navigated with
-/// the D-pad and A/B.
+/// The menu's data: paired hosts and the identity a new host would see.
 #[derive(Clone, PartialEq, Eq)]
 struct Settings {
     hosts: Vec<bluez::Host>,
     profiles: HashMap<Addr, Profile>,
     /// The identity a new host would pair with, when no host is known yet.
     pairing: Profile,
-    cursor: usize,
     error: Option<String>,
 }
 
-type DrawKey = (
-    Profile,
-    String,
-    hid::State,
-    Option<Settings>,
-    Option<(usize, Option<String>)>,
-    bool,
-);
+/// One focusable line in the main menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MenuRow {
+    Host(usize),
+    Pair,
+}
+
+/// The screen currently displayed above the Bluetooth session.
+#[derive(Clone, PartialEq, Eq)]
+enum Screen {
+    Controller,
+    Menu { cursor: usize },
+    Profile { choice: Profile },
+    Pairing { back: bool },
+}
+
+/// A modal waiting for A or B.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ModalState {
+    Forget(usize),
+}
+
+type DrawKey = (View, StatusInfo, Option<Modal>, Option<u8>);
 
 #[derive(Clone)]
 struct InputMonitor {
@@ -647,82 +608,46 @@ impl Settings {
     fn load(bus: &bluez::Bus, pairing: Profile) -> Self {
         match bus.paired_hosts() {
             Ok(hosts) => {
-                eprintln!("settings: {} paired host(s)", hosts.len());
+                eprintln!("menu: {} paired host(s)", hosts.len());
                 Self {
                     hosts,
                     profiles: load_profiles(),
                     pairing,
-                    cursor: 0,
                     error: None,
                 }
             }
             Err(error) => {
-                eprintln!("settings: {error}");
+                eprintln!("menu: {error}");
                 Self {
                     hosts: Vec::new(),
                     profiles: load_profiles(),
                     pairing,
-                    cursor: 0,
                     error: Some(error),
                 }
             }
         }
     }
 
-    fn selected(&self) -> Option<&bluez::Host> {
-        self.hosts.get(self.cursor)
-    }
-
-    /// With no paired host, the only row chooses the identity for the next
-    /// pairing, so a host can be paired as Xbox from the start. A BlueZ error
-    /// leaves no usable row.
-    fn has_pairing_row(&self) -> bool {
-        self.hosts.is_empty() && self.error.is_none()
-    }
-
-    fn at_pairing(&self) -> bool {
-        self.has_pairing_row() && self.cursor == self.hosts.len()
-    }
-
-    fn rows(&self) -> usize {
-        self.hosts.len() + usize::from(self.has_pairing_row())
-    }
-
-    fn move_cursor(&mut self, delta: isize) {
-        let len = self.rows();
-        if len == 0 {
-            return;
-        }
-        self.cursor = ((self.cursor as isize + delta).rem_euclid(len as isize)) as usize;
+    /// Devices always ends with "Pair a new device", even while a host is
+    /// connected: connecting and pairing are explicit choices on this screen.
+    fn rows(&self) -> Vec<MenuRow> {
+        let mut rows: Vec<MenuRow> = (0..self.hosts.len()).map(MenuRow::Host).collect();
+        rows.push(MenuRow::Pair);
+        rows
     }
 
     fn profile_for(&self, address: Addr) -> Profile {
         self.profiles.get(&address).copied().unwrap_or(Profile::Pc)
     }
-
-    fn toggle_profile(&mut self, address: Addr) -> Profile {
-        let next = match self.profile_for(address) {
-            Profile::Pc => Profile::Xbox,
-            Profile::Xbox => Profile::Pc,
-        };
-        self.profiles.insert(address, next);
-        save_profiles(&self.profiles);
-        next
-    }
-
-    fn toggle_pairing(&mut self) -> Profile {
-        self.pairing = match self.pairing {
-            Profile::Pc => Profile::Xbox,
-            Profile::Xbox => Profile::Pc,
-        };
-        save_last_profile(self.pairing);
-        self.pairing
-    }
 }
 
 enum SessionOutcome {
     Quit,
-    SwitchProfile(Profile),
+    SwitchProfile {
+        profile: Profile,
+        connect: Option<Addr>,
+    },
+    Retry,
 }
 
 /// Release every button the host may still see held, in the profile's format.
@@ -747,39 +672,82 @@ fn drive_rumble(motor: Option<&rumble::Rumble>, report: &[u8]) {
     }
 }
 
+/// End the active link, a half-open pairing channel and any connect attempt.
+/// Devices is a chooser, so nothing may keep running while it is open.
+fn stop_devices_session(
+    link: &mut Option<Link>,
+    half: &mut Option<(Channel, Addr)>,
+    bus: &bluez::Bus,
+    target: &Arc<Mutex<Option<Addr>>>,
+    connected: &Arc<AtomicBool>,
+    motor: Option<&rumble::Rumble>,
+) {
+    if let Some(l) = link.take() {
+        let _ = bus.disconnect(l.host);
+        eprintln!("link: {} disconnected for Devices", l.name);
+    }
+    half.take();
+    *target.lock().unwrap() = None;
+    // No address survives in the file: the next start must not look for a host.
+    save_host(None);
+    connected.store(false, Ordering::Relaxed);
+    if let Some(motor) = motor {
+        motor.set(0);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn open_devices(
+    link: &mut Option<Link>,
+    half: &mut Option<(Channel, Addr)>,
+    bus: &bluez::Bus,
+    settings: &mut Settings,
+    profile: Profile,
+    target: &Arc<Mutex<Option<Addr>>>,
+    connected: &Arc<AtomicBool>,
+    motor: Option<&rumble::Rumble>,
+) {
+    stop_devices_session(link, half, bus, target, connected, motor);
+    *settings = Settings::load(bus, profile);
+}
+
 /// Bluetooth up as the chosen controller, until F1+F2 is held or another host
 /// profile is selected.
 fn session(
     profile: Profile,
     start_in_settings: bool,
+    connect: Option<Addr>,
     screen: &Renderer,
     pad: &mut pad::Pad,
 ) -> Result<SessionOutcome, String> {
     if !start_in_settings {
-        screen.show(frame(profile, Status::Starting, pad.mapper.state, false));
+        screen.show(Frame {
+            view: View::Splash {
+                message: "Starting Bluetooth…".into(),
+            },
+            status: StatusInfo::read(false),
+            modal: None,
+            hold: None,
+        });
     }
 
     let daemon = match bluez::Daemon::take_over(profile.bt_name(), profile.device_id()) {
         Ok(d) => d,
-        Err(e) => return fail(profile, screen, pad, e),
+        Err(e) => return fail(screen, pad, e),
     };
     let bus = match bluez::Bus::open(&sdp::record(profile.bt_name(), profile.descriptor())) {
         Ok(b) => b,
-        Err(e) => return fail(profile, screen, pad, e),
+        Err(e) => return fail(screen, pad, e),
     };
     let _ = bus.set_alias(profile.bt_name());
     let listeners =
         Listener::bind(sdp::PSM_CONTROL).and_then(|c| Ok((c, Listener::bind(sdp::PSM_INTERRUPT)?)));
     let (control_listener, interrupt_listener) = match listeners {
         Ok(pair) => pair,
-        Err(e) => {
-            return fail(
-                profile,
-                screen,
-                pad,
-                format!("could not open the HID channels: {e}"),
-            )
-        }
+        // A socket already in use is not a Bluetooth-off condition: another
+        // instance or a stale listener owns the HID PSMs. Exit cleanly so the
+        // wrapper restores the system instead of showing the recovery screen.
+        Err(e) => return Err(format!("could not open the HID channels: {e}")),
     };
     let _ = control_listener.set_nonblocking();
     let _ = interrupt_listener.set_nonblocking();
@@ -797,7 +765,7 @@ fn session(
         Profile::Pc => None,
     };
 
-    let target = Arc::new(Mutex::new(saved_host()));
+    let target = Arc::new(Mutex::new(connect));
     let connected = Arc::new(AtomicBool::new(false));
     let (reconnected_tx, reconnected) = mpsc::channel();
     let stop = Arc::new(AtomicBool::new(false));
@@ -816,30 +784,52 @@ fn session(
     let mut sent = None;
     let mut sent_at = Instant::now();
     let mut previous = pad.mapper.state;
-    // A restart can happen while a key is held (F2 switches a profile). Start
-    // from the real state so that key is not seen as a fresh press.
+    // A restart can happen while a function key is held; start from the real
+    // state so it is not seen as a fresh press.
     let mut previous_f1 = pad.mapper.f1;
     let mut previous_f2 = pad.mapper.f2;
     let mut chord_since: Option<Instant> = None;
-    let mut chord_used = false;
-    let mut settings: Option<Settings> = start_in_settings.then(|| Settings::load(&bus, profile));
-    let mut monitor: Option<InputMonitor> = None;
-    // The profile to switch to. A switch always comes from settings, so the
-    // new session reopens it.
+    let mut chord_seen = false;
+    let mut settings = Settings::load(&bus, profile);
+    let mut state = Screen::Menu { cursor: 0 };
+    let mut modal: Option<ModalState> = None;
+    let mut events = InputMonitor::new();
+    // The profile to switch to. A switch always comes from the menu, so the
+    // new session reopens it. The host is reconnected only when the switch was
+    // part of an explicit Connect.
     let mut switch_to: Option<Profile> = None;
+    let mut switch_connect: Option<Addr> = None;
     let mut drawn: Option<DrawKey> = None;
-    let mut names: std::collections::HashMap<Addr, String> = Default::default();
+    let mut backlight = display::Backlight::open();
+    // A dark panel is woken only by holding a function key; `wake_used` keeps
+    // the release that follows from also opening a screen.
+    let mut screen_off = false;
+    let mut wake_since: Option<Instant> = None;
+    let mut wake_used = false;
+    let mut screen_off_at: Option<Instant> = None;
+    // A gamepad button used in a menu must not be sent to the host when the
+    // controller view comes back; wait until every button is released.
+    let mut resume_after_release = false;
+    let mut last_ui_active = true;
 
-    let outcome = loop {
-        // Discoverable only while nothing is connected: a gamepad in use has
-        // no reason to answer every scan in the room.
-        let want_discoverable = link.is_none();
+    let outcome = 'session: loop {
+        // Only the pairing screen advertises and accepts a new host. Devices
+        // and its sub-screens stay quiet so nothing connects behind the
+        // user's back; an explicit Connect goes through the reconnector.
+        let pairing_screen = matches!(state, Screen::Pairing { .. });
+        let want_discoverable = pairing_screen;
         if discoverable != Some(want_discoverable) {
             if let Err(e) = bus.set_discoverable(want_discoverable) {
                 eprintln!("bluez: {e}");
             }
             discoverable = Some(want_discoverable);
         }
+
+        let control_state = if matches!(state, Screen::Controller) && modal.is_none() {
+            pad.mapper.state
+        } else {
+            hid::State::default()
+        };
 
         let mut fds = vec![
             libc::pollfd {
@@ -871,9 +861,12 @@ fn session(
             });
         }
         // A change held back by the report gap is due when the gap ends;
-        // everything else waits for something to happen.
+        // everything else waits for something to happen. A dark panel has no
+        // animation to feed, so it can sleep between input events.
         let wait = if link.is_some() && Some(pad.mapper.state) != sent {
             REPORT_GAP.saturating_sub(sent_at.elapsed()).as_millis() as i32
+        } else if screen_off {
+            SCREEN_OFF_POLL
         } else {
             100
         };
@@ -888,33 +881,48 @@ fn session(
         }
 
         // New connections: the host opens control first, then interrupt.
+        // Outside the pairing screen the channels are accepted and dropped so
+        // a stale peer cannot reconnect on its own.
         if let Ok(Some((control, host))) = control_listener.accept() {
-            eprintln!("link: control channel from {host}");
-            half = Some((control, host));
+            if pairing_screen {
+                eprintln!("link: control channel from {host}");
+                half = Some((control, host));
+            } else {
+                eprintln!("link: control channel from {host} outside pairing; dropped");
+            }
         }
         if let Ok(Some((interrupt, host))) = interrupt_listener.accept() {
-            match half.take() {
-                Some((control, from)) if from == host => {
-                    link = Some(Link {
-                        control,
-                        interrupt,
-                        name: String::new(),
-                        host,
-                    });
+            if !pairing_screen {
+                eprintln!("link: interrupt channel from {host} outside pairing; dropped");
+            } else {
+                match half.take() {
+                    Some((control, from)) if from == host => {
+                        link = Some(Link {
+                            control,
+                            interrupt,
+                            name: String::new(),
+                            host,
+                        });
+                    }
+                    _ => eprintln!(
+                        "link: interrupt channel from {host} with no control channel; dropped"
+                    ),
                 }
-                _ => eprintln!(
-                    "link: interrupt channel from {host} with no control channel; dropped"
-                ),
             }
         }
         if let Ok((control, interrupt, host)) = reconnected.try_recv() {
-            if link.is_none() {
+            // The user may have left Devices, or chosen another host, while
+            // this attempt was paging: a stale link must not come up behind
+            // the screen that cancelled it.
+            if link.is_none() && *target.lock().unwrap() == Some(host) {
                 link = Some(Link {
                     control,
                     interrupt,
                     name: String::new(),
                     host,
                 });
+            } else {
+                eprintln!("link: stale reconnection to {host} dropped");
             }
         }
         if let Some(l) = link.as_mut().filter(|l| l.name.is_empty()) {
@@ -931,8 +939,12 @@ fn session(
                 motor.set(0);
             }
             // The controller view is the point of a connected host.
-            settings = None;
-            monitor = None;
+            settings = Settings::load(&bus, profile);
+            state = Screen::Controller;
+            modal = None;
+            events = InputMonitor::new();
+            screen_off_at = Some(Instant::now() + SCREEN_OFF_AFTER);
+            resume_after_release = false;
             drawn = None;
             // A report the radio cannot take yet is dropped, not queued: the
             // next one carries the whole state.
@@ -947,7 +959,7 @@ fn session(
         if let Some(l) = &link {
             loop {
                 match l.control.recv() {
-                    Ok(Some(message)) => match hid::control(&message, &pad.mapper.state) {
+                    Ok(Some(message)) => match hid::control(&message, &control_state) {
                         hid::Control::Reply(bytes) => {
                             if let Some(report) = hid::set_report_output(&message) {
                                 drive_rumble(motor.as_ref(), report);
@@ -982,11 +994,369 @@ fn session(
                     }
                 }
             }
-            let report_state = if settings.is_some() || monitor.is_some() {
-                hid::State::default()
+        }
+        if unplugged {
+            if let Some(l) = link.take() {
+                eprintln!("link: {} unpaired us", l.name);
+                let _ = bus.remove(l.host);
+            }
+            save_host(None);
+            *target.lock().unwrap() = None;
+            lost = true;
+        }
+        if lost {
+            if let Some(l) = link.take() {
+                eprintln!("link: {} disconnected", l.name);
+            }
+            // A host that goes away must not leave the motor running, and
+            // Devices must not keep paging it.
+            open_devices(
+                &mut link,
+                &mut half,
+                &bus,
+                &mut settings,
+                profile,
+                &target,
+                &connected,
+                motor.as_ref(),
+            );
+            // The menu now shows the new state; a dark panel must come back
+            // so the user can see why the link went away.
+            if screen_off {
+                backlight.on();
+                screen_off = false;
+                wake_since = None;
+                wake_used = false;
+            }
+            state = Screen::Menu { cursor: 0 };
+            modal = None;
+            events = InputMonitor::new();
+            screen_off_at = None;
+            drawn = None;
+            lost = false;
+        }
+
+        let now = pad.mapper.state;
+        let f1_now = pad.mapper.f1;
+        let f2_now = pad.mapper.f2;
+        let f1_pressed = f1_now && !previous_f1;
+        let f1_released = previous_f1 && !f1_now;
+        let f2_pressed = f2_now && !previous_f2;
+        let f2_released = previous_f2 && !f2_now;
+        let a_pressed = now.pressed(hid::button::EAST) && !previous.pressed(hid::button::EAST);
+        let b_pressed = now.pressed(hid::button::SOUTH) && !previous.pressed(hid::button::SOUTH);
+        let x_pressed = now.pressed(hid::button::NORTH) && !previous.pressed(hid::button::NORTH);
+        let direction = nav_dir(previous.hat, now.hat);
+
+        // The event log feeds the controller view; while a menu is open the
+        // same buttons navigate and never reach the host.
+        if link.is_some() && matches!(state, Screen::Controller) {
+            record_input(
+                &mut events,
+                &previous,
+                &now,
+                previous_f1,
+                f1_now,
+                previous_f2,
+                f2_now,
+            );
+        }
+
+        // Touching a function key keeps the panel on: the countdown is only
+        // for a session left alone after pairing.
+        if !screen_off && (f1_pressed || f2_pressed) {
+            screen_off_at = None;
+            drawn = None;
+        }
+
+        // A dark panel is woken by holding either function key. Nothing else
+        // reaches the app until the key is released, so the wake cannot also
+        // open the menu or start the chord.
+        if screen_off {
+            if f1_now || f2_now {
+                let since = wake_since.get_or_insert_with(Instant::now);
+                if since.elapsed() >= WAKE_HOLD {
+                    backlight.on();
+                    screen_off = false;
+                    wake_used = true;
+                    wake_since = None;
+                    drawn = None;
+                }
             } else {
-                pad.mapper.state
+                wake_since = None;
+                wake_used = false;
+            }
+        } else if !wake_used {
+            let chord_was_seen = chord_seen;
+            let both = f1_now && f2_now;
+            if both {
+                chord_seen = true;
+                let since = chord_since.get_or_insert_with(Instant::now);
+                if since.elapsed() >= MENU_CHORD_HOLD && matches!(state, Screen::Controller) {
+                    open_devices(
+                        &mut link,
+                        &mut half,
+                        &bus,
+                        &mut settings,
+                        profile,
+                        &target,
+                        &connected,
+                        motor.as_ref(),
+                    );
+                    state = Screen::Menu { cursor: 0 };
+                    modal = None;
+                    events = InputMonitor::new();
+                    screen_off_at = None;
+                    drawn = None;
+                }
+            } else {
+                chord_since = None;
+            }
+            if !f1_now && !f2_now {
+                chord_seen = false;
+            }
+            let chord_suppress = chord_seen || (chord_was_seen && !f1_now && !f2_now);
+            let back = b_pressed || f1_released;
+            let confirm = a_pressed || f2_released;
+
+            if !chord_suppress {
+                if let Some(pending) = modal {
+                    if confirm {
+                        match pending {
+                            ModalState::Forget(index) => {
+                                if let Some(host) = settings.hosts.get(index) {
+                                    let addr = host.addr;
+                                    eprintln!("menu: forget {addr}");
+                                    stop_devices_session(
+                                        &mut link,
+                                        &mut half,
+                                        &bus,
+                                        &target,
+                                        &connected,
+                                        motor.as_ref(),
+                                    );
+                                    let _ = bus.remove(addr);
+                                    settings.profiles.remove(&addr);
+                                    save_profiles(&settings.profiles);
+                                    settings = Settings::load(&bus, profile);
+                                    state = Screen::Menu { cursor: 0 };
+                                }
+                                modal = None;
+                                drawn = None;
+                            }
+                        }
+                    } else if back {
+                        modal = None;
+                        drawn = None;
+                    }
+                } else {
+                    match state.clone() {
+                        Screen::Menu { cursor } => {
+                            let rows = settings.rows();
+                            let cursor = cursor.min(rows.len().saturating_sub(1));
+                            if let Some(dir) = direction {
+                                let delta = match dir {
+                                    Dir::Up => -1,
+                                    Dir::Down => 1,
+                                    _ => 0,
+                                };
+                                if delta != 0 {
+                                    state = Screen::Menu {
+                                        cursor: move_cursor(cursor, rows.len(), delta),
+                                    };
+                                    drawn = None;
+                                }
+                            }
+                            if b_pressed {
+                                if let Some(l) = &link {
+                                    send_neutral(l, profile);
+                                }
+                                break 'session SessionOutcome::Quit;
+                            }
+                            if x_pressed {
+                                if let Some(MenuRow::Host(index)) = rows.get(cursor).copied() {
+                                    // Forget is decided on this screen; a
+                                    // pending Connect must not win the race.
+                                    stop_devices_session(
+                                        &mut link,
+                                        &mut half,
+                                        &bus,
+                                        &target,
+                                        &connected,
+                                        motor.as_ref(),
+                                    );
+                                    modal = Some(ModalState::Forget(index));
+                                    drawn = None;
+                                }
+                            }
+                            if confirm {
+                                if let Some(row) = rows.get(cursor).copied() {
+                                    // Connect is always a fresh choice from
+                                    // this screen, never a resumed link.
+                                    stop_devices_session(
+                                        &mut link,
+                                        &mut half,
+                                        &bus,
+                                        &target,
+                                        &connected,
+                                        motor.as_ref(),
+                                    );
+                                    match row {
+                                        MenuRow::Host(index) => {
+                                            if let Some(host) = settings.hosts.get(index) {
+                                                let addr = host.addr;
+                                                let desired = settings.profile_for(addr);
+                                                eprintln!(
+                                                    "menu: connect {addr} as {}",
+                                                    desired.label()
+                                                );
+                                                bus.trust(addr);
+                                                save_host(Some(addr));
+                                                *target.lock().unwrap() = Some(addr);
+                                                if desired != profile {
+                                                    switch_to = Some(desired);
+                                                    switch_connect = Some(addr);
+                                                } else {
+                                                    state = Screen::Menu { cursor: index };
+                                                }
+                                            }
+                                        }
+                                        MenuRow::Pair => state = Screen::Pairing { back: true },
+                                    }
+                                    drawn = None;
+                                }
+                            } else if f1_released && link.is_some() {
+                                state = Screen::Controller;
+                                drawn = None;
+                            }
+                        }
+                        Screen::Profile { choice } => {
+                            if let Some(dir) = direction {
+                                let step = match dir {
+                                    Dir::Up => -1,
+                                    Dir::Down => 1,
+                                    _ => 0,
+                                };
+                                if step != 0 {
+                                    let current = Profile::ALL
+                                        .iter()
+                                        .position(|profile| *profile == choice)
+                                        .unwrap_or(0)
+                                        as isize;
+                                    let next = (current + step)
+                                        .rem_euclid(Profile::ALL.len() as isize)
+                                        as usize;
+                                    state = Screen::Profile {
+                                        choice: Profile::ALL[next],
+                                    };
+                                    drawn = None;
+                                }
+                            }
+                            if confirm {
+                                if choice != settings.pairing {
+                                    settings.pairing = choice;
+                                    save_last_profile(choice);
+                                    switch_to = Some(choice);
+                                } else {
+                                    state = Screen::Pairing { back: true };
+                                }
+                                drawn = None;
+                            } else if back {
+                                state = Screen::Pairing { back: true };
+                                drawn = None;
+                            }
+                        }
+                        Screen::Pairing { back: can_back } => {
+                            if x_pressed {
+                                state = Screen::Profile {
+                                    choice: settings.pairing,
+                                };
+                                drawn = None;
+                            } else if back && can_back {
+                                open_devices(
+                                    &mut link,
+                                    &mut half,
+                                    &bus,
+                                    &mut settings,
+                                    profile,
+                                    &target,
+                                    &connected,
+                                    motor.as_ref(),
+                                );
+                                state = Screen::Menu { cursor: 0 };
+                                drawn = None;
+                            }
+                        }
+                        Screen::Controller => {
+                            // F1 is the short way to the menu; the F1+F2 hold
+                            // is handled above, before this match.
+                            if f1_released {
+                                open_devices(
+                                    &mut link,
+                                    &mut half,
+                                    &bus,
+                                    &mut settings,
+                                    profile,
+                                    &target,
+                                    &connected,
+                                    motor.as_ref(),
+                                );
+                                state = Screen::Menu { cursor: 0 };
+                                events = InputMonitor::new();
+                                screen_off_at = None;
+                                drawn = None;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if f1_now != previous_f1 {
+            eprintln!("ui: f1 {f1_now}");
+        }
+        if f2_now != previous_f2 {
+            eprintln!("ui: f2 {f2_now}");
+        }
+        previous_f1 = f1_now;
+        previous_f2 = f2_now;
+        if !f1_now && !f2_now {
+            wake_used = false;
+        }
+
+        if !screen_off
+            && matches!(state, Screen::Controller)
+            && link.is_some()
+            && screen_off_at.is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            backlight.off();
+            screen_off = true;
+            screen_off_at = None;
+            drawn = None;
+        }
+
+        if let Some(next) = switch_to {
+            break 'session SessionOutcome::SwitchProfile {
+                profile: next,
+                connect: switch_connect,
             };
+        }
+
+        let ui_active = !matches!(state, Screen::Controller) || modal.is_some();
+        if last_ui_active && !ui_active {
+            resume_after_release = true;
+        }
+        if resume_after_release && now == hid::State::default() {
+            resume_after_release = false;
+        }
+        last_ui_active = ui_active;
+        let report_state = if ui_active || chord_seen || resume_after_release {
+            hid::State::default()
+        } else {
+            now
+        };
+
+        if let Some(l) = &link {
             let due =
                 Some(report_state) != sent && (sent.is_none() || sent_at.elapsed() >= REPORT_GAP);
             if !lost && due {
@@ -1020,226 +1390,77 @@ fn session(
                 }
             }
         }
-        if unplugged {
-            if let Some(l) = link.take() {
-                eprintln!("link: {} unpaired us", l.name);
-                let _ = bus.remove(l.host);
-            }
-            save_host(None);
-            *target.lock().unwrap() = None;
-            lost = true;
-        }
         if lost {
             if let Some(l) = link.take() {
-                eprintln!("link: {} disconnected", l.name);
+                eprintln!("link: {} disconnected while sending", l.name);
             }
-            connected.store(false, Ordering::Relaxed);
-            // A host that goes away must not leave the motor running.
-            if let Some(motor) = &motor {
-                motor.set(0);
-            }
-            // The host list now shows the new state; the controller view is
-            // only for a connected host.
-            settings = None;
-            monitor = None;
-            drawn = None;
-        }
-
-        // The controller view is only meaningful with a host. While nothing
-        // is connected the settings screen is the app's screen.
-        if link.is_none() {
-            monitor = None;
-            if settings.is_none() {
-                settings = Some(Settings::load(&bus, profile));
-                drawn = None;
-            }
-        }
-
-        // F1 opens settings, F2 opens the input monitor. F1 fires on release
-        // so a short F1+F2 chord never opens either screen.
-        let now = pad.mapper.state;
-        let f1_now = pad.mapper.f1;
-        let f2_now = pad.mapper.f2;
-        let f1_released = previous_f1 && !f1_now;
-        let f2_pressed = f2_now && !previous_f2;
-        if f1_now && f2_now {
-            chord_used = true;
-            let since = chord_since.get_or_insert_with(Instant::now);
-            if since.elapsed() >= QUIT_CHORD_HOLD {
-                if let Some(l) = &link {
-                    send_neutral(l, profile);
-                }
-                break SessionOutcome::Quit;
-            }
-        } else {
-            // A released key breaks the chord: the next hold starts its own
-            // timer. `chord_used` stays set until both are up, so a release
-            // in this frame cannot trigger F1 or F2.
-            chord_since = None;
-        }
-        if f1_released && !chord_used && link.is_some() {
-            settings = match settings {
-                Some(_) => None,
-                None => {
-                    monitor = None;
-                    Some(Settings::load(&bus, profile))
-                }
-            };
-            drawn = None;
-        }
-        if f2_pressed && !f1_now && !chord_used && settings.is_none() && link.is_some() {
-            monitor = if monitor.is_some() {
-                None
-            } else {
-                Some(InputMonitor::new())
-            };
-            drawn = None;
-        }
-        if let Some(entry) = monitor.as_mut() {
-            record_input(
-                entry,
-                &previous,
-                &now,
-                previous_f1,
-                f1_now,
-                previous_f2,
-                f2_now,
+            open_devices(
+                &mut link,
+                &mut half,
+                &bus,
+                &mut settings,
+                profile,
+                &target,
+                &connected,
+                motor.as_ref(),
             );
-        }
-        if f1_now != previous_f1 {
-            eprintln!("ui: f1 {f1_now}");
-        }
-        if f2_now != previous_f2 {
-            eprintln!("ui: f2 {f2_now}");
-        }
-        previous_f1 = f1_now;
-        previous_f2 = f2_now;
-
-        // Settings navigation: D-pad moves, A connects/disconnects, F2 switches
-        // the selected host between the PC and Xbox identities. The quit chord
-        // keeps navigation quiet while it is held.
-        if let Some(open) = settings.as_mut().filter(|_| !chord_used) {
-            let hat_to = |dir: u8| now.hat == dir && previous.hat != dir;
-            if hat_to(0) {
-                open.move_cursor(-1);
-            } else if hat_to(4) {
-                open.move_cursor(1);
-            } else if f2_pressed && !f1_now && !chord_used {
-                if open.at_pairing() {
-                    let next = open.toggle_pairing();
-                    eprintln!("settings: next pairing {}", next.label());
-                    switch_to = Some(next);
-                } else if let Some(host) = open.selected().cloned() {
-                    let next = open.toggle_profile(host.addr);
-                    eprintln!("settings: {} profile {}", host.addr, next.label());
-                    let is_current = link.as_ref().is_some_and(|l| l.host == host.addr)
-                        || *target.lock().unwrap() == Some(host.addr);
-                    if is_current {
-                        // A host caches the identity it first paired with. The
-                        // old link key would let it come back with the previous
-                        // identity, so forget the pairing here too and let the
-                        // user pair afresh under the new name.
-                        if let Some(l) = link.take() {
-                            let _ = bus.disconnect(l.host);
-                        }
-                        if !bus.remove(host.addr) {
-                            eprintln!("settings: could not forget {}", host.addr);
-                        }
-                        save_host(None);
-                        *target.lock().unwrap() = None;
-                        connected.store(false, Ordering::Relaxed);
-                        switch_to = Some(next);
-                    }
-                }
-            } else if now.pressed(hid::button::EAST) && !previous.pressed(hid::button::EAST) {
-                if let Some(host) = open.selected().cloned() {
-                    if host.connected {
-                        eprintln!("settings: disconnect {}", host.addr);
-                        if let Some(l) = link.take() {
-                            let _ = bus.disconnect(l.host);
-                        } else {
-                            let _ = bus.disconnect(host.addr);
-                        }
-                        save_host(None);
-                        *target.lock().unwrap() = None;
-                        connected.store(false, Ordering::Relaxed);
-                        if let Some(motor) = &motor {
-                            motor.set(0);
-                        }
-                        settings = None;
-                    } else {
-                        let desired = open.profile_for(host.addr);
-                        eprintln!("settings: connect {} as {}", host.addr, desired.label());
-                        if let Some(l) = link.take() {
-                            let _ = bus.disconnect(l.host);
-                            connected.store(false, Ordering::Relaxed);
-                        }
-                        bus.trust(host.addr);
-                        save_host(Some(host.addr));
-                        *target.lock().unwrap() = Some(host.addr);
-                        if desired != profile {
-                            switch_to = Some(desired);
-                        }
-                    }
-                }
+            if screen_off {
+                backlight.on();
+                screen_off = false;
+                wake_since = None;
+                wake_used = false;
             }
-        }
-        if let Some(next) = switch_to {
-            break SessionOutcome::SwitchProfile(next);
-        }
-        // A key may have cleared the settings view while the host is gone;
-        // without a connection, settings is the only screen.
-        if link.is_none() && settings.is_none() {
-            settings = Some(Settings::load(&bus, profile));
+            state = Screen::Menu { cursor: 0 };
+            modal = None;
+            events = InputMonitor::new();
+            screen_off_at = None;
             drawn = None;
         }
-        if !f1_now && !f2_now {
-            chord_used = false;
-        }
-        previous = now;
 
-        // While settings or the input monitor is open the host gets a neutral
-        // report, so navigation cannot press buttons in the game.
-        let report_state = if settings.is_some() || monitor.is_some() {
-            hid::State::default()
-        } else {
-            pad.mapper.state
-        };
-        let status = match &link {
-            Some(l) => Status::Connected {
-                name: l.name.clone(),
-            },
-            None => {
-                // By name, as the host announced itself; asked of BlueZ once.
-                let reconnecting = (*target.lock().unwrap()).map(|a| {
-                    names
-                        .entry(a)
-                        .or_insert_with(|| bus.name_of(a).unwrap_or_else(|| a.to_string()))
-                        .clone()
-                });
-                Status::Waiting { reconnecting }
-            }
-        };
-        let chord_held = f1_now && f2_now;
-        let monitor_key = monitor
-            .as_ref()
-            .map(|monitor| (monitor.lines.len(), monitor.lines.last().cloned()));
-        let key = (
+        if screen_off {
+            previous = now;
+            continue;
+        }
+
+        let status = StatusInfo::read(true);
+        let countdown = screen_off_at.map(|deadline| {
+            let seconds = deadline
+                .saturating_duration_since(Instant::now())
+                .as_secs()
+                .max(1);
+            format!("Screen off in {seconds} s · hold F1 or F2 to wake")
+        });
+        let target_addr = *target.lock().unwrap();
+        let view = view_for(
+            &state,
+            &settings,
+            link.as_ref(),
+            &events,
+            countdown,
             profile,
-            status_key(&status),
-            report_state,
-            settings.clone(),
-            monitor_key,
-            chord_held,
+            target_addr,
         );
-        if drawn.as_ref() != Some(&key) {
+        let modal_view = modal.as_ref().map(|pending| modal_view(pending, &settings));
+        let hold = if chord_seen && matches!(state, Screen::Controller) && !screen_off {
+            chord_since.map(|since| {
+                ((since.elapsed().as_secs_f32() / MENU_CHORD_HOLD.as_secs_f32()).clamp(0.0, 1.0)
+                    * 20.0) as u8
+            })
+        } else {
+            None
+        };
+        let key = (view.clone(), status.clone(), modal_view.clone(), hold);
+        if !screen_off && drawn.as_ref() != Some(&key) {
             screen.show(Frame {
-                settings: settings.clone(),
-                monitor: monitor.clone(),
-                ..frame(profile, status, pad.mapper.state, chord_held)
+                view,
+                status,
+                modal: modal_view,
+                hold,
             });
             drawn = Some(key);
         }
+
+        previous = now;
     };
 
     drop(link);
@@ -1249,33 +1470,143 @@ fn session(
     Ok(outcome)
 }
 
-fn status_key(status: &Status) -> String {
-    match status {
-        Status::Starting => "starting".into(),
-        Status::Failed(e) => format!("failed {e}"),
-        Status::Waiting { reconnecting } => format!("waiting {reconnecting:?}"),
-        Status::Connected { name } => format!("connected {name}"),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Dir {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+fn primary_dir(hat: u8) -> Option<Dir> {
+    match hat {
+        0..=1 | 7 => Some(Dir::Up),
+        2 => Some(Dir::Right),
+        3..=5 => Some(Dir::Down),
+        6 => Some(Dir::Left),
+        _ => None,
     }
 }
 
-/// Show an error and wait for MENU or B, so it can be read before the app
-/// closes.
-fn fail(
+fn nav_dir(previous: u8, current: u8) -> Option<Dir> {
+    let from = primary_dir(previous);
+    let to = primary_dir(current);
+    if from == to {
+        None
+    } else {
+        to
+    }
+}
+
+fn move_cursor(cursor: usize, len: usize, delta: isize) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    ((cursor as isize + delta).rem_euclid(len as isize)) as usize
+}
+
+fn view_for(
+    screen: &Screen,
+    settings: &Settings,
+    link: Option<&Link>,
+    events: &InputMonitor,
+    countdown: Option<String>,
     profile: Profile,
-    screen: &Renderer,
-    pad: &mut pad::Pad,
-    error: String,
-) -> Result<SessionOutcome, String> {
+    target: Option<Addr>,
+) -> View {
+    match screen {
+        Screen::Controller => View::Controller {
+            host: link.map(|l| l.name.clone()).unwrap_or_default(),
+            profile: profile.label(),
+            connected: link.is_some(),
+            events: events.lines.clone(),
+            countdown,
+        },
+        Screen::Menu { cursor } => {
+            let rows = settings.rows();
+            let cursor = (*cursor).min(rows.len().saturating_sub(1));
+            let start = cursor.saturating_sub(4);
+            let rows = rows
+                .iter()
+                .enumerate()
+                .skip(start)
+                .take(5)
+                .map(|(index, row)| match row {
+                    MenuRow::Host(host_index) => {
+                        let host = &settings.hosts[*host_index];
+                        let status = if host.connected {
+                            "Connected"
+                        } else {
+                            "Offline"
+                        };
+                        Row::new(
+                            host.name.clone(),
+                            format!("{} · {status}", settings.profile_for(host.addr).label()),
+                            index == cursor,
+                        )
+                    }
+                    MenuRow::Pair => Row::new(
+                        "Pair a new device",
+                        settings.pairing.label(),
+                        index == cursor,
+                    ),
+                })
+                .collect();
+            View::Menu { rows }
+        }
+        Screen::Profile { choice } => {
+            let rows = Profile::ALL
+                .iter()
+                .map(|profile| Row::new(profile.label(), "", *profile == *choice))
+                .collect();
+            View::Profile { rows }
+        }
+        Screen::Pairing { .. } => View::Pairing {
+            identity: settings.pairing.bt_name().into(),
+            controller_type: settings.pairing.label(),
+            reconnecting: target.map(|addr| addr.to_string()),
+        },
+    }
+}
+
+fn modal_view(modal: &ModalState, settings: &Settings) -> Modal {
+    match modal {
+        ModalState::Forget(index) => {
+            let name = settings
+                .hosts
+                .get(*index)
+                .map(|host| host.name.clone())
+                .unwrap_or_else(|| "this controller".into());
+            Modal {
+                title: format!("Forget {name}?"),
+                message: "You will need to pair it again from the host.".into(),
+                confirm: "Forget",
+                destructive: true,
+            }
+        }
+    }
+}
+
+/// Show an error and wait for Retry or Quit.
+fn fail(screen: &Renderer, pad: &mut pad::Pad, error: String) -> Result<SessionOutcome, String> {
     eprintln!("brick-controller: {error}");
-    screen.show(Frame {
-        profile,
-        status: Status::Failed(error.clone()),
-        state: pad.mapper.state,
-        chord_held: false,
-        settings: None,
-        monitor: None,
-    });
     let deadline = Instant::now() + Duration::from_secs(60);
+    let mut previous = pad.mapper.state;
+    let mut shown = 60u64;
+    screen.show(Frame {
+        view: View::Error {
+            title: "Bluetooth off".into(),
+            message: error.clone(),
+            steps: vec![
+                "Open NextUI Settings and turn Bluetooth on.".into(),
+                "Close Brick Controller and open it again.".into(),
+            ],
+            countdown: Some("Closing in 60 s.".into()),
+        },
+        status: StatusInfo::read(false),
+        modal: None,
+        hold: None,
+    });
     while Instant::now() < deadline {
         let mut fd = libc::pollfd {
             fd: pad.as_raw_fd(),
@@ -1284,1051 +1615,154 @@ fn fail(
         };
         unsafe { libc::poll(&mut fd, 1, 200) };
         if fd.revents & libc::POLLIN != 0 && pad.read().is_ok() {
-            let s = &pad.mapper.state;
-            if s.pressed(hid::button::HOME) || s.pressed(hid::button::SOUTH) {
-                break;
+            let now = pad.mapper.state;
+            let a = now.pressed(hid::button::EAST) && !previous.pressed(hid::button::EAST);
+            let b = now.pressed(hid::button::SOUTH) && !previous.pressed(hid::button::SOUTH);
+            previous = now;
+            if a {
+                return Ok(SessionOutcome::Retry);
+            }
+            if b {
+                return Ok(SessionOutcome::Quit);
             }
         }
+        let left = deadline.saturating_duration_since(Instant::now()).as_secs();
+        if left != shown {
+            shown = left;
+            screen.show(Frame {
+                view: View::Error {
+                    title: "Bluetooth off".into(),
+                    message: error.clone(),
+                    steps: vec![
+                        "Open NextUI Settings and turn Bluetooth on.".into(),
+                        "Close Brick Controller and open it again.".into(),
+                    ],
+                    countdown: Some(format!("Closing in {left} s.")),
+                },
+                status: StatusInfo::read(false),
+                modal: None,
+                hold: None,
+            });
+        }
     }
-    drop(error);
     Ok(SessionOutcome::Quit)
-}
-
-#[derive(Clone, Copy)]
-enum Control {
-    /// A hat direction, true for it and for the two diagonals beside it.
-    Hat(u8),
-}
-
-fn lit(control: Control, state: &hid::State) -> bool {
-    match control {
-        Control::Hat(dir) => {
-            state.hat != hid::HAT_CENTRED
-                && matches!((state.hat as i32 - dir as i32).rem_euclid(8), 0 | 1 | 7)
-        }
-    }
-}
-
-/// Coverage for a rounded rectangle, anti-aliased on its edge. A circle is
-/// the case where the radius is half the side.
-fn round_rect_mask(w: i32, h: i32, r: i32) -> Vec<u8> {
-    let (w, h) = (w.max(1), h.max(1));
-    let r = (r as f32).min(w as f32 / 2.0).min(h as f32 / 2.0);
-    let (hw, hh) = (w as f32 / 2.0, h as f32 / 2.0);
-    let mut mask = Vec::with_capacity((w * h) as usize);
-    for y in 0..h {
-        for x in 0..w {
-            let qx = ((x as f32 + 0.5 - hw).abs() - (hw - r)).max(0.0);
-            let qy = ((y as f32 + 0.5 - hh).abs() - (hh - r)).max(0.0);
-            let d = (qx * qx + qy * qy).sqrt() - r;
-            mask.push(((0.5 - d).clamp(0.0, 1.0) * 255.0) as u8);
-        }
-    }
-    mask
-}
-
-fn round_rect(canvas: &mut Canvas, x: i32, y: i32, w: i32, h: i32, r: i32, colour: Rgb) {
-    // The same few shapes every frame; their masks are worked out once.
-    thread_local! {
-        static MASKS: std::cell::RefCell<std::collections::HashMap<(i32, i32, i32), Vec<u8>>> = Default::default();
-    }
-    MASKS.with(|masks| {
-        let mut masks = masks.borrow_mut();
-        let mask = masks
-            .entry((w, h, r))
-            .or_insert_with(|| round_rect_mask(w, h, r));
-        canvas.blend_mask(x, y, w.max(1) as usize, mask, colour);
-    });
-}
-
-fn circle(canvas: &mut Canvas, cx: i32, cy: i32, r: i32, colour: Rgb) {
-    round_rect(canvas, cx - r, cy - r, 2 * r, 2 * r, r, colour);
-}
-
-const BODY: Rgb = Rgb(0x28, 0x28, 0x28);
-const BODY_EDGE: Rgb = Rgb(0x50, 0x49, 0x45);
-const SHOULDER_BACK: Rgb = Rgb(0x50, 0x49, 0x45);
-
-/// A shoulder button, `visible` pixels of it above the body: the front one
-/// (L1/R1) solid, the back one (L2/R2) filling up with how far its trigger is
-/// pulled. The tab runs on under the body, which is drawn over it.
-// The extra coordinates are the drawing API; grouping them would only move the
-// same arguments into a struct at every call site.
-#[allow(clippy::too_many_arguments)]
-fn shoulder(
-    canvas: &mut Canvas,
-    fonts: &mut Fonts,
-    x: i32,
-    y: i32,
-    w: i32,
-    visible: i32,
-    label: &str,
-    on: bool,
-    travel: Option<u8>,
-) {
-    let base = if travel.is_some() {
-        SHOULDER_BACK
-    } else {
-        CHIP
-    };
-    round_rect(
-        canvas,
-        x,
-        y,
-        w,
-        visible + 40,
-        18,
-        if on { ACCENT } else { base },
-    );
-    if let (Some(t), false) = (travel, on) {
-        let filled = visible * t as i32 / 255;
-        if filled > 0 {
-            canvas.fill_rect(x + 10, y + visible - filled, w - 20, filled, CURSOR);
-        }
-    }
-    fonts.draw_centred(
-        canvas,
-        label,
-        x + w / 2,
-        y + visible / 2 + 9,
-        26.0,
-        if on { BG } else { FG },
-    );
-}
-
-fn face_button(canvas: &mut Canvas, fonts: &mut Fonts, cx: i32, cy: i32, label: &str, on: bool) {
-    circle(canvas, cx, cy, 44, if on { ACCENT } else { CHIP });
-    fonts.draw_centred(canvas, label, cx, cy + 12, 34.0, if on { BG } else { FG });
-}
-
-fn pill(canvas: &mut Canvas, fonts: &mut Fonts, cx: i32, cy: i32, w: i32, label: &str, on: bool) {
-    round_rect(
-        canvas,
-        cx - w / 2,
-        cy - 20,
-        w,
-        40,
-        20,
-        if on { ACCENT } else { CHIP },
-    );
-    fonts.draw_centred(canvas, label, cx, cy + 8, 20.0, if on { BG } else { FG });
-}
-
-/// The D-pad as a cross; each arm lights for its direction and the
-/// diagonals beside it.
-/// An analog stick: its well, and the cap shown where the stick is pushed.
-fn stick(canvas: &mut Canvas, cx: i32, cy: i32, x: u8, y: u8, clicked: bool) {
-    circle(canvas, cx, cy, 54, CHIP);
-    circle(canvas, cx, cy, 48, WELL);
-    let offset = |v: u8| (v as i32 - 128) * 26 / 128;
-    circle(
-        canvas,
-        cx + offset(x),
-        cy + offset(y),
-        30,
-        if clicked { ACCENT } else { KNOB },
-    );
-}
-
-/// The title and the rule under it, with a short reading at the right of
-/// the title's line.
-fn header(canvas: &mut Canvas, fonts: &mut Fonts, title: &str, corner: &str, corner_colour: Rgb) {
-    let w = canvas.width();
-    fonts.draw(canvas, title, LEFT, TITLE_BASELINE, TITLE_SIZE, TITLE);
-    let size = TITLE_SIZE * 0.75;
-    let room = w - LEFT * 2 - fonts.measure(title, TITLE_SIZE) - 24;
-    let corner = fonts.ellipsize(corner, size, room);
-    let cw = fonts.measure(&corner, size);
-    fonts.draw(
-        canvas,
-        &corner,
-        w - LEFT - cw,
-        TITLE_BASELINE,
-        size,
-        corner_colour,
-    );
-    canvas.fill_rect(LEFT, RULE_Y, w - LEFT * 2, 2, RULE);
-}
-
-/// Button hints along the bottom - each key in the accent, what it does
-/// beside it - and the credit at the right.
-fn footer(canvas: &mut Canvas, fonts: &mut Fonts, hints: &[(&str, &str)], credit: &str) {
-    let w = canvas.width();
-    let mut x = LEFT;
-    for (i, (key, does)) in hints.iter().enumerate() {
-        if i > 0 {
-            x += 26;
-        }
-        x = fonts.draw(canvas, key, x, BOTTOM_BASELINE, HINT_SIZE, ACCENT) + 8;
-        x = fonts.draw(canvas, does, x, BOTTOM_BASELINE, HINT_SIZE, DIM);
-    }
-    let size = HINT_SIZE * 0.85;
-    let credit = fonts.ellipsize(credit, size, w - LEFT - x - 32);
-    let cw = fonts.measure(&credit, size);
-    fonts.draw(canvas, &credit, w - LEFT - cw, BOTTOM_BASELINE, size, DIM);
-}
-
-/// Lines of text under the rule: the first in the text colour, the rest
-/// dimmer. `who`, if the first line names it, is picked out in green: the
-/// host connected, the one thing worth finding at a glance.
-fn lines(canvas: &mut Canvas, fonts: &mut Fonts, text: &[String], who: Option<&str>) {
-    let w = canvas.width();
-    let mut y = CONTENT_TOP;
-    for (i, line) in text.iter().enumerate() {
-        if let Some((who, (before, after))) = who
-            .filter(|_| i == 0)
-            .and_then(|who| Some((who, line.split_once(who)?)))
-        {
-            let x = fonts.draw(canvas, before, LEFT, y, TEXT_SIZE, FG);
-            // A long name gives way, so the line stays on one row.
-            let room = w - LEFT - x - fonts.measure(after, TEXT_SIZE);
-            let who = fonts.ellipsize(who, TEXT_SIZE, room);
-            let x = fonts.draw(canvas, &who, x, y, TEXT_SIZE, OK);
-            fonts.draw(canvas, after, x, y, TEXT_SIZE, FG);
-            y += 36;
-            continue;
-        }
-        for wrapped in fonts.wrap(line, TEXT_SIZE, w - LEFT * 2, 2) {
-            fonts.draw(
-                canvas,
-                &wrapped,
-                LEFT,
-                y,
-                TEXT_SIZE,
-                if i == 0 { FG } else { DIM },
-            );
-            y += 36;
-        }
-    }
-}
-
-/// A line `width` wide from one point to another, as a run of dots: enough
-/// for the few short strokes of the face buttons' symbols.
-fn stroke(
-    canvas: &mut Canvas,
-    (x0, y0): (i32, i32),
-    (x1, y1): (i32, i32),
-    width: i32,
-    colour: Rgb,
-) {
-    let steps = (x1 - x0).abs().max((y1 - y0).abs()).max(1);
-    for i in 0..=steps {
-        circle(
-            canvas,
-            x0 + (x1 - x0) * i / steps,
-            y0 + (y1 - y0) * i / steps,
-            width / 2,
-            colour,
-        );
-    }
-}
-
-/// A round face button `r` across; returns the colour to mark it in.
-fn round_button(canvas: &mut Canvas, cx: i32, cy: i32, r: i32, on: bool) -> Rgb {
-    circle(canvas, cx, cy, r, if on { ACCENT } else { CHIP });
-    if on {
-        BG
-    } else {
-        FG
-    }
-}
-
-/// The D-pad as a cross, `arm` wide and reaching `reach` from its centre;
-/// each arm lights for its direction and the diagonals beside it.
-fn dpad_sized(canvas: &mut Canvas, cx: i32, cy: i32, arm: i32, reach: i32, state: &hid::State) {
-    let r = arm / 5;
-    round_rect(canvas, cx - arm / 2, cy - reach, arm, 2 * reach, r, CHIP);
-    round_rect(canvas, cx - reach, cy - arm / 2, 2 * reach, arm, r, CHIP);
-    let len = reach - arm / 2 - 4;
-    let arms = [
-        (0, cx - arm / 2, cy - reach, arm, len),
-        (4, cx - arm / 2, cy + arm / 2 + 4, arm, len),
-        (6, cx - reach, cy - arm / 2, len, arm),
-        (2, cx + arm / 2 + 4, cy - arm / 2, len, arm),
-    ];
-    for (dir, x, y, w, h) in arms {
-        if lit(Control::Hat(dir), state) {
-            round_rect(canvas, x, y, w, h, r, ACCENT);
-        }
-    }
-    circle(canvas, cx, cy, arm / 5, WELL);
-}
-
-/// The face of an Xbox-style controller: an offset layout, the left stick
-/// above the D-pad and the face buttons above the right stick. Drawn plain,
-/// with no maker's logo: the Home button is a plain disc.
-#[allow(dead_code)]
-fn xbox_face(canvas: &mut Canvas, fonts: &mut Fonts, state: &hid::State) {
-    use hid::button;
-    // Bumpers in front, triggers behind them; the body overlaps both.
-    shoulder(
-        canvas,
-        fonts,
-        210,
-        196,
-        150,
-        60,
-        "LT",
-        state.pressed(button::L2),
-        Some(state.triggers[0]),
-    );
-    shoulder(
-        canvas,
-        fonts,
-        664,
-        196,
-        150,
-        60,
-        "RT",
-        state.pressed(button::R2),
-        Some(state.triggers[1]),
-    );
-    shoulder(
-        canvas,
-        fonts,
-        150,
-        236,
-        220,
-        56,
-        "LB",
-        state.pressed(button::L1),
-        None,
-    );
-    shoulder(
-        canvas,
-        fonts,
-        654,
-        236,
-        220,
-        56,
-        "RB",
-        state.pressed(button::R1),
-        None,
-    );
-    // The body: a wide top and two grips.
-    for (grow, colour) in [(3, BODY_EDGE), (0, BODY)] {
-        round_rect(
-            canvas,
-            110 - grow,
-            280 - grow,
-            804 + 2 * grow,
-            270 + 2 * grow,
-            130 + grow,
-            colour,
-        );
-        circle(canvas, 250, 548, 140 + grow, colour);
-        circle(canvas, 774, 548, 140 + grow, colour);
-    }
-    // Plain disc for Home, View and Menu beside it.
-    circle(
-        canvas,
-        512,
-        330,
-        30,
-        if state.pressed(button::HOME) {
-            ACCENT
-        } else {
-            CHIP
-        },
-    );
-    pill(
-        canvas,
-        fonts,
-        440,
-        410,
-        70,
-        "VIEW",
-        state.pressed(button::SELECT),
-    );
-    pill(
-        canvas,
-        fonts,
-        584,
-        410,
-        70,
-        "MENU",
-        state.pressed(button::START),
-    );
-    let [lx, ly, rx, ry] = state.sticks;
-    stick(canvas, 290, 395, lx, ly, state.pressed(button::L3));
-    dpad_sized(canvas, 390, 545, 54, 82, state);
-    stick(canvas, 634, 545, rx, ry, state.pressed(button::R3));
-    // A, B, X, Y by position, as Xbox games read them: the bottom button is
-    // A whatever the handheld prints on it.
-    let (fx, fy, gap) = (744, 395, 66);
-    for (label, x, y, n) in [
-        ("Y", fx, fy - gap, button::NORTH),
-        ("X", fx - gap, fy, button::WEST),
-        ("B", fx + gap, fy, button::EAST),
-        ("A", fx, fy + gap, button::SOUTH),
-    ] {
-        let on = state.pressed(n);
-        let ink = round_button(canvas, x, y, 34, on);
-        fonts.draw_centred(
-            canvas,
-            label,
-            x,
-            y + 11,
-            32.0,
-            if on { ink } else { letter_colour(label) },
-        );
-    }
-}
-
-/// The colours Xbox players know the letters by, in the theme's own
-/// shades.
-fn letter_colour(label: &str) -> Rgb {
-    match label {
-        "A" => OK,
-        "B" => ERROR,
-        "X" => Rgb(0x83, 0xA5, 0x98),
-        _ => WARN,
-    }
-}
-
-/// The face of a DualShock-style controller: both sticks low and side by
-/// side, a touchpad between the D-pad and the face buttons, which carry
-/// shapes rather than letters. The Home button is a plain disc.
-#[allow(dead_code)]
-fn ds4_face(canvas: &mut Canvas, fonts: &mut Fonts, state: &hid::State) {
-    use hid::button;
-    shoulder(
-        canvas,
-        fonts,
-        180,
-        196,
-        160,
-        60,
-        "L2",
-        state.pressed(button::L2),
-        Some(state.triggers[0]),
-    );
-    shoulder(
-        canvas,
-        fonts,
-        684,
-        196,
-        160,
-        60,
-        "R2",
-        state.pressed(button::R2),
-        Some(state.triggers[1]),
-    );
-    shoulder(
-        canvas,
-        fonts,
-        150,
-        236,
-        200,
-        52,
-        "L1",
-        state.pressed(button::L1),
-        None,
-    );
-    shoulder(
-        canvas,
-        fonts,
-        674,
-        236,
-        200,
-        52,
-        "R1",
-        state.pressed(button::R1),
-        None,
-    );
-    // A wide top, and two long grips reaching down.
-    for (grow, colour) in [(3, BODY_EDGE), (0, BODY)] {
-        round_rect(
-            canvas,
-            110 - grow,
-            276 - grow,
-            804 + 2 * grow,
-            250 + 2 * grow,
-            110 + grow,
-            colour,
-        );
-        round_rect(
-            canvas,
-            130 - grow,
-            380 - grow,
-            250 + 2 * grow,
-            320 + 2 * grow,
-            125 + grow,
-            colour,
-        );
-        round_rect(
-            canvas,
-            644 - grow,
-            380 - grow,
-            250 + 2 * grow,
-            320 + 2 * grow,
-            125 + grow,
-            colour,
-        );
-    }
-    // The touchpad, Share and Options at its corners.
-    round_rect(canvas, 392, 290, 240, 130, 20, WELL);
-    pill(
-        canvas,
-        fonts,
-        340,
-        316,
-        84,
-        "SHARE",
-        state.pressed(button::SELECT),
-    );
-    pill(
-        canvas,
-        fonts,
-        690,
-        316,
-        104,
-        "OPTIONS",
-        state.pressed(button::START),
-    );
-    dpad_sized(canvas, 255, 380, 54, 84, state);
-    let [lx, ly, rx, ry] = state.sticks;
-    stick(canvas, 400, 530, lx, ly, state.pressed(button::L3));
-    stick(canvas, 624, 530, rx, ry, state.pressed(button::R3));
-    circle(
-        canvas,
-        512,
-        500,
-        24,
-        if state.pressed(button::HOME) {
-            ACCENT
-        } else {
-            CHIP
-        },
-    );
-    // Shapes by position: triangle top, circle right, cross bottom, square
-    // left - the same buttons the PS4 mode sends.
-    let (fx, fy, gap) = (789, 380, 66);
-    let shapes: [(i32, i32, u8, Rgb); 4] = [
-        (fx, fy - gap, button::NORTH, OK),
-        (fx + gap, fy, button::EAST, ERROR),
-        (fx, fy + gap, button::SOUTH, Rgb(0x83, 0xA5, 0x98)),
-        (fx - gap, fy, button::WEST, Rgb(0xD3, 0x86, 0x9B)),
-    ];
-    for (i, (x, y, n, tint)) in shapes.into_iter().enumerate() {
-        let on = state.pressed(n);
-        let ink = if on {
-            round_button(canvas, x, y, 34, true)
-        } else {
-            round_button(canvas, x, y, 34, false);
-            tint
-        };
-        let fill = if on { ACCENT } else { CHIP };
-        match i {
-            // Triangle.
-            0 => {
-                let (a, b, c) = ((x, y - 15), (x - 15, y + 11), (x + 15, y + 11));
-                stroke(canvas, a, b, 5, ink);
-                stroke(canvas, b, c, 5, ink);
-                stroke(canvas, c, a, 5, ink);
-            }
-            // Circle: a ring.
-            1 => {
-                circle(canvas, x, y, 15, ink);
-                circle(canvas, x, y, 10, fill);
-            }
-            // Cross.
-            2 => {
-                stroke(canvas, (x - 12, y - 12), (x + 12, y + 12), 5, ink);
-                stroke(canvas, (x - 12, y + 12), (x + 12, y - 12), 5, ink);
-            }
-            // Square.
-            _ => {
-                canvas.fill_rect(x - 13, y - 13, 26, 26, ink);
-                canvas.fill_rect(x - 8, y - 8, 16, 16, fill);
-            }
-        }
-    }
-}
-
-/// The handheld's own face, as the generic gamepad has no other: laid out
-/// as the buttons sit on the Brick.
-fn brick_face(canvas: &mut Canvas, fonts: &mut Fonts, state: &hid::State) {
-    use hid::button;
-    let w = canvas.width();
-    let (bx, by, bw, bh) = (64, 256, w - 128, 436);
-    // Shoulders first, so the body overlaps their lower edge. On the
-    // handheld L1/R1 sit at the outer corners and L2/R2 just inside them.
-    shoulder(
-        canvas,
-        fonts,
-        bx + 8,
-        by - 64,
-        190,
-        64,
-        "L1",
-        state.pressed(button::L1),
-        None,
-    );
-    shoulder(
-        canvas,
-        fonts,
-        bx + bw - 198,
-        by - 64,
-        190,
-        64,
-        "R1",
-        state.pressed(button::R1),
-        None,
-    );
-    shoulder(
-        canvas,
-        fonts,
-        bx + 210,
-        by - 64,
-        170,
-        64,
-        "L2",
-        state.pressed(button::L2),
-        Some(state.triggers[0]),
-    );
-    shoulder(
-        canvas,
-        fonts,
-        bx + bw - 380,
-        by - 64,
-        170,
-        64,
-        "R2",
-        state.pressed(button::R2),
-        Some(state.triggers[1]),
-    );
-    round_rect(canvas, bx - 3, by - 3, bw + 6, bh + 6, 51, BODY_EDGE);
-    round_rect(canvas, bx, by, bw, bh, 48, BODY);
-
-    let mid_y = by + 158;
-    dpad_sized(canvas, bx + 210, mid_y, 74, 112, state);
-
-    // Diamond: X top, Y left, A right, B bottom, as printed on the handheld.
-    let (fx, gap) = (bx + bw - 210, 92);
-    face_button(
-        canvas,
-        fonts,
-        fx,
-        mid_y - gap,
-        "X",
-        state.pressed(button::NORTH),
-    );
-    face_button(
-        canvas,
-        fonts,
-        fx - gap,
-        mid_y,
-        "Y",
-        state.pressed(button::WEST),
-    );
-    face_button(
-        canvas,
-        fonts,
-        fx + gap,
-        mid_y,
-        "A",
-        state.pressed(button::EAST),
-    );
-    face_button(
-        canvas,
-        fonts,
-        fx,
-        mid_y + gap,
-        "B",
-        state.pressed(button::SOUTH),
-    );
-
-    // Sticks below the D-pad and the face buttons, on the models that have
-    // them. The Brick standard's status screen keeps the same row for the
-    // menu buttons so the layout stays balanced.
-    let stick_y = by + bh - 74;
-    if has_sticks() {
-        let [lx, ly, rx, ry] = state.sticks;
-        stick(canvas, bx + 210, stick_y, lx, ly, state.pressed(button::L3));
-        stick(canvas, fx, stick_y, rx, ry, state.pressed(button::R3));
-    }
-
-    let cx = bx + bw / 2;
-    // MENU, SELECT, START from left to right, as on the handheld.
-    pill(
-        canvas,
-        fonts,
-        cx - 112,
-        stick_y,
-        100,
-        "MENU",
-        state.pressed(button::HOME),
-    );
-    pill(
-        canvas,
-        fonts,
-        cx,
-        stick_y,
-        100,
-        "SELECT",
-        state.pressed(button::SELECT),
-    );
-    pill(
-        canvas,
-        fonts,
-        cx + 112,
-        stick_y,
-        100,
-        "START",
-        state.pressed(button::START),
-    );
-}
-
-fn draw(
-    canvas: &mut Canvas,
-    fonts: &mut Fonts,
-    profile: Profile,
-    status: &Status,
-    state: &hid::State,
-    chord_held: bool,
-) {
-    canvas.clear(BG);
-
-    let (corner, colour, text): (String, Rgb, Vec<String>) = match status {
-        Status::Starting => ("Starting".into(), DIM, vec!["Turning Bluetooth on…".into()]),
-        Status::Failed(e) => (
-            "Could not start".into(),
-            ERROR,
-            vec![e.clone(), "Press B or MENU to quit.".into()],
-        ),
-        Status::Waiting { reconnecting } => {
-            let pair = format!(
-                "On a PC or Mac: Bluetooth settings > choose \"{}\".",
-                profile.bt_name()
-            );
-            let mut text = vec![pair];
-            if let Some(host) = reconnecting {
-                text.push(format!("Reconnecting to {host}…"));
-            } else {
-                text.push("Pair from the host's Bluetooth settings.".into());
-                text.push("Profile changed? Forget the old pairing first.".into());
-            }
-            (format!("{} · waiting", profile.label()), WARN, text)
-        }
-        Status::Connected { name } => (
-            format!("{} · connected", profile.label()),
-            OK,
-            vec![format!("Connected to {name}.")],
-        ),
-    };
-    header(canvas, fonts, NAME, &corner, colour);
-    let who = match status {
-        Status::Connected { name } => Some(name.as_str()),
-        _ => None,
-    };
-    lines(canvas, fonts, &text, who);
-
-    // The Brick's own controls, lighting what is pressed.
-    brick_face(canvas, fonts, state);
-
-    let credit = NAME;
-    if chord_held {
-        footer(canvas, fonts, &[("F1+F2", "keep holding to quit…")], credit);
-    } else {
-        footer(
-            canvas,
-            fonts,
-            &[("F1", "settings"), ("F2", "inputs"), ("F1+F2", "quit")],
-            credit,
-        );
-    }
-}
-
-/// The settings screen: the paired hosts and their link state. It is also
-/// what the app shows while no host is connected.
-fn draw_settings(
-    canvas: &mut Canvas,
-    fonts: &mut Fonts,
-    settings: &Settings,
-    connected: bool,
-    chord_held: bool,
-) {
-    let w = canvas.width();
-    canvas.clear(BG);
-    header(canvas, fonts, "Settings", &format!("{NAME} {VERSION}"), DIM);
-
-    let (size, row_h) = (30.0, 70);
-    if let Some(error) = &settings.error {
-        for (i, line) in fonts.wrap(error, 24.0, w - LEFT * 2, 2).iter().enumerate() {
-            fonts.draw(canvas, line, LEFT, CONTENT_TOP + i as i32 * 32, 24.0, ERROR);
-        }
-    } else if settings.hosts.is_empty() {
-        fonts.draw(canvas, "No paired host.", LEFT, CONTENT_TOP, size, FG);
-        fonts.draw(
-            canvas,
-            &format!("Pair with \"{}\".", settings.pairing.bt_name()),
-            LEFT,
-            CONTENT_TOP + 36,
-            24.0,
-            DIM,
-        );
-        let baseline = CONTENT_TOP + 100;
-        if settings.at_pairing() {
-            canvas.fill_rect(LEFT - 12, baseline - 42, w - LEFT * 2 + 24, row_h, CURSOR);
-        }
-        fonts.draw(canvas, "Next pairing", LEFT, baseline, size, FG);
-        let label = settings.pairing.label();
-        let lw = fonts.measure(label, 24.0);
-        fonts.draw(canvas, label, w - LEFT - lw, baseline, 24.0, OK);
-        fonts.draw(
-            canvas,
-            "F2 to change · used for the next host",
-            LEFT,
-            baseline + 24,
-            18.0,
-            DIM,
-        );
-        fonts.draw(
-            canvas,
-            "Profile changed? Forget the old pairing first.",
-            LEFT,
-            baseline + 56,
-            18.0,
-            DIM,
-        );
-    } else {
-        let visible = 8;
-        let start = settings.cursor.saturating_sub(visible - 1);
-        for (index, host) in settings.hosts.iter().enumerate().skip(start).take(visible) {
-            let baseline = CONTENT_TOP + 8 + (index - start) as i32 * row_h;
-            if index == settings.cursor {
-                canvas.fill_rect(LEFT - 12, baseline - 42, w - LEFT * 2 + 24, row_h, CURSOR);
-            }
-            fonts.draw(canvas, &host.name, LEFT, baseline, size, FG);
-            let status = if host.connected {
-                "connected"
-            } else {
-                "disconnected"
-            };
-            let sw = fonts.measure(status, 24.0);
-            fonts.draw(
-                canvas,
-                status,
-                w - LEFT - sw,
-                baseline,
-                24.0,
-                if host.connected { OK } else { DIM },
-            );
-            let profile = settings.profile_for(host.addr);
-            fonts.draw(
-                canvas,
-                &format!("{} · {}", host.addr, profile.label()),
-                LEFT,
-                baseline + 24,
-                18.0,
-                DIM,
-            );
-        }
-    }
-
-    // Discreet upstream credit and version. The full license stays in the pak.
-    let notice = format!("{NAME} {VERSION} · based on {PADPOD_CREDIT} · {HOME_PAGE}");
-    let lines = fonts.wrap(&notice, 18.0, w - LEFT * 2, 1);
-    for (i, line) in lines.iter().enumerate() {
-        fonts.draw(
-            canvas,
-            line,
-            LEFT,
-            BOTTOM_BASELINE - 38 + i as i32 * 24,
-            18.0,
-            DIM,
-        );
-    }
-    if chord_held {
-        footer(canvas, fonts, &[("F1+F2", "keep holding to quit…")], "");
-    } else if settings.has_pairing_row() {
-        footer(canvas, fonts, &[("F2", "PC/Xbox"), ("F1+F2", "quit")], "");
-    } else if settings.hosts.is_empty() {
-        footer(canvas, fonts, &[("F1+F2", "quit")], "");
-    } else {
-        let mut hints = vec![
-            ("A", "connect/disconnect"),
-            ("F2", "PC/Xbox"),
-            ("F1+F2", "quit"),
-        ];
-        if connected {
-            hints.insert(0, ("F1", "controller"));
-        }
-        footer(canvas, fonts, &hints, "");
-    }
-}
-
-fn draw_input_monitor(
-    canvas: &mut Canvas,
-    fonts: &mut Fonts,
-    monitor: &InputMonitor,
-    chord_held: bool,
-) {
-    canvas.clear(BG);
-    header(
-        canvas,
-        fonts,
-        "Input monitor",
-        &format!("{NAME} {VERSION}"),
-        DIM,
-    );
-
-    if monitor.lines.is_empty() {
-        fonts.draw(canvas, "Press a button…", LEFT, CONTENT_TOP, 30.0, DIM);
-    } else {
-        let visible = 14;
-        let start = monitor.lines.len().saturating_sub(visible);
-        let lines = &monitor.lines[start..];
-        let bottom = BOTTOM_BASELINE - 70;
-        for (index, line) in lines.iter().enumerate() {
-            let y = bottom - (lines.len() - 1 - index) as i32 * 32;
-            fonts.draw(canvas, line, LEFT, y, 24.0, FG);
-        }
-    }
-
-    if chord_held {
-        footer(canvas, fonts, &[("F1+F2", "keep holding to quit…")], "");
-    } else {
-        footer(
-            canvas,
-            fonts,
-            &[("F2", "controller"), ("F1+F2", "quit")],
-            "",
-        );
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
-    /// `BRICK_CONTROLLER_PREVIEW=dir cargo test preview` writes each screen as a PNG,
-    /// for checking the layout without the device.
+    fn preview_status(bluetooth: bool) -> StatusInfo {
+        StatusInfo {
+            clock: "14:32".into(),
+            battery: Some(76),
+            charging: false,
+            wifi: true,
+            bluetooth,
+        }
+    }
+
+    fn preview_menu_rows(linked: bool) -> Vec<Row> {
+        let mut rows = vec![
+            Row::new(
+                "MacBook Pro",
+                if linked {
+                    "PC · Connected"
+                } else {
+                    "PC · Offline"
+                },
+                true,
+            ),
+            Row::new("iPhone", "Xbox · Offline", false),
+        ];
+        rows.push(Row::new("Pair a new device", "PC", false));
+        rows
+    }
+
+    /// `BRICK_CONTROLLER_PREVIEW=dir cargo test preview` writes every screen
+    /// as a PNG, so the layout can be checked without the device.
     #[test]
     fn preview_every_screen() {
         let Ok(dir) = std::env::var("BRICK_CONTROLLER_PREVIEW") else {
             return;
         };
+        let _ = fs::create_dir_all(&dir);
+        let theme = Theme::fallback();
         let mut fonts = Fonts::load(&[]);
-        let mut pressed = hid::State::default();
-        pressed.set_button(hid::button::SOUTH, true);
-        pressed.set_button(hid::button::R1, true);
-        pressed.hat = 1;
-        pressed.triggers[0] = 120;
-        pressed.sticks = [128, 128, 255, 60];
-        pressed.set_button(hid::button::L3, true);
-        let screens = [
-            ("starting", Status::Starting, hid::State::default()),
-            (
-                "failed",
-                Status::Failed(
-                    "Bluetooth is off. Turn it on in NextUI settings and open Brick Controller again."
-                        .into(),
-                ),
-                hid::State::default(),
-            ),
-            (
-                "waiting",
-                Status::Waiting {
-                    reconnecting: Some("Pixel 9".into()),
-                },
-                hid::State::default(),
-            ),
-            ("connected", Status::Connected { name: "my-pc".into() }, pressed),
+        let events = vec![
+            "  1.2 s  A down".into(),
+            "  1.4 s  B down".into(),
+            "  1.8 s  D-pad up-right".into(),
+            "  2.1 s  R2 120".into(),
+            "  2.3 s  F1 down".into(),
         ];
-        let mut canvas = Canvas::in_memory(1024, 768);
-        draw(
-            &mut canvas,
-            &mut fonts,
-            Profile::Pc,
-            &Status::Waiting { reconnecting: None },
-            &hid::State::default(),
-            false,
-        );
-        draw_settings(
-            &mut canvas,
-            &mut fonts,
-            &Settings {
-                hosts: vec![
-                    bluez::Host {
-                        addr: Addr([0x11; 6]),
-                        name: "Studio Mac".into(),
-                        connected: true,
-                    },
-                    bluez::Host {
-                        addr: Addr([0x22; 6]),
-                        name: "Desktop PC".into(),
-                        connected: false,
-                    },
-                ],
-                profiles: HashMap::from([(Addr([0x22; 6]), Profile::Xbox)]),
-                pairing: Profile::Pc,
-                cursor: 1,
-                error: None,
-            },
-            true,
-            false,
-        );
-        png::write_png(
-            &format!("{dir}/settings.png"),
-            1024,
-            768,
-            &canvas.snapshot_rgb(),
-        )
-        .unwrap();
-        let mut canvas = Canvas::in_memory(1024, 768);
-        draw_settings(
-            &mut canvas,
-            &mut fonts,
-            &Settings {
-                hosts: Vec::new(),
-                profiles: HashMap::new(),
-                pairing: Profile::Xbox,
-                cursor: 0,
-                error: None,
-            },
-            false,
-            false,
-        );
-        png::write_png(
-            &format!("{dir}/settings-empty.png"),
-            1024,
-            768,
-            &canvas.snapshot_rgb(),
-        )
-        .unwrap();
-        let mut monitor = InputMonitor::new();
-        for line in [
-            "MENU down",
-            "MENU up",
-            "D-pad right",
-            "A down",
-            "A up",
-            "L2 255",
-            "R2 120",
-            "sticks 255 128 128 60",
-            "SELECT down",
-            "SELECT up",
-            "F1 down",
-            "F1 up",
-            "F2 down",
-            "F2 up",
-        ] {
-            monitor.push(line);
-        }
-        let mut canvas = Canvas::in_memory(1024, 768);
-        draw_input_monitor(&mut canvas, &mut fonts, &monitor, false);
-        png::write_png(
-            &format!("{dir}/monitor.png"),
-            1024,
-            768,
-            &canvas.snapshot_rgb(),
-        )
-        .unwrap();
-        for (name, status, state) in screens {
+        let screens: Vec<(&str, View, StatusInfo)> = vec![
+            (
+                "splash",
+                View::Splash {
+                    message: "Starting Bluetooth…".into(),
+                },
+                preview_status(false),
+            ),
+            (
+                "controller",
+                View::Controller {
+                    host: "MacBook Pro".into(),
+                    profile: "PC",
+                    connected: true,
+                    events,
+                    countdown: Some("Screen off in 9 s · hold F1 or F2 to wake".into()),
+                },
+                preview_status(true),
+            ),
+            (
+                "menu",
+                View::Menu {
+                    rows: preview_menu_rows(true),
+                },
+                preview_status(true),
+            ),
+            (
+                "menu-idle",
+                View::Menu {
+                    rows: preview_menu_rows(false),
+                },
+                preview_status(true),
+            ),
+            (
+                "profile",
+                View::Profile {
+                    rows: vec![Row::new("PC", "", true), Row::new("Xbox", "", false)],
+                },
+                preview_status(true),
+            ),
+            (
+                "pairing",
+                View::Pairing {
+                    identity: "Brick Controller".into(),
+                    controller_type: "PC",
+                    reconnecting: None,
+                },
+                preview_status(true),
+            ),
+            (
+                "error",
+                View::Error {
+                    title: "Bluetooth off".into(),
+                    message: "Brick Controller could not start Bluetooth.".into(),
+                    steps: vec![
+                        "Open NextUI Settings and turn Bluetooth on.".into(),
+                        "Close Brick Controller and open it again.".into(),
+                    ],
+                    countdown: Some("Closing in 60 s.".into()),
+                },
+                preview_status(false),
+            ),
+        ];
+        for (name, view, status) in screens {
             let mut canvas = Canvas::in_memory(1024, 768);
-            draw(&mut canvas, &mut fonts, Profile::Pc, &status, &state, false);
+            ui::draw(&mut canvas, &mut fonts, &theme, &view, &status, None, None);
             png::write_png(
                 &format!("{dir}/{name}.png"),
                 1024,
@@ -2337,19 +1771,52 @@ mod tests {
             )
             .unwrap();
         }
+
+        let modal = Modal {
+            title: "Forget MacBook Pro?".into(),
+            message: "You will need to pair it again from the host.".into(),
+            confirm: "Forget",
+            destructive: true,
+        };
         let mut canvas = Canvas::in_memory(1024, 768);
-        draw(
+        ui::draw(
             &mut canvas,
             &mut fonts,
-            Profile::Pc,
-            &Status::Connected {
-                name: "my-pc".into(),
+            &theme,
+            &View::Menu {
+                rows: preview_menu_rows(true),
             },
-            &hid::State::default(),
-            true,
+            &preview_status(true),
+            Some(&modal),
+            None,
         );
         png::write_png(
-            &format!("{dir}/connected-quit.png"),
+            &format!("{dir}/confirm.png"),
+            1024,
+            768,
+            &canvas.snapshot_rgb(),
+        )
+        .unwrap();
+
+        let controller = View::Controller {
+            host: "MacBook Pro".into(),
+            profile: "PC",
+            connected: true,
+            events: vec!["  1.2 s  A down".into()],
+            countdown: None,
+        };
+        let mut canvas = Canvas::in_memory(1024, 768);
+        ui::draw(
+            &mut canvas,
+            &mut fonts,
+            &theme,
+            &controller,
+            &preview_status(true),
+            None,
+            Some(0.72),
+        );
+        png::write_png(
+            &format!("{dir}/hold.png"),
             1024,
             768,
             &canvas.snapshot_rgb(),
@@ -2358,37 +1825,37 @@ mod tests {
     }
 
     #[test]
-    fn the_settings_cursor_moves_and_wraps() {
-        let host = |n: u8| bluez::Host {
-            addr: Addr([n; 6]),
-            name: format!("host {n}"),
-            connected: false,
-        };
-        let mut settings = Settings {
-            hosts: vec![host(1), host(2)],
-            profiles: HashMap::new(),
-            pairing: Profile::Pc,
-            cursor: 0,
-            error: None,
-        };
-        settings.move_cursor(1);
-        assert_eq!(settings.cursor, 1);
-        settings.move_cursor(1);
-        assert_eq!(settings.cursor, 0, "wraps");
-        settings.move_cursor(-1);
-        assert_eq!(settings.cursor, 1);
+    fn the_dpad_maps_to_one_direction_at_a_time() {
+        assert_eq!(nav_dir(hid::HAT_CENTRED, 2), Some(Dir::Right));
+        assert_eq!(nav_dir(2, 3), Some(Dir::Down));
+        assert_eq!(nav_dir(1, 2), Some(Dir::Right));
+        assert_eq!(nav_dir(1, 0), None);
+        assert_eq!(nav_dir(0, hid::HAT_CENTRED), None);
+    }
 
-        let mut empty = Settings {
-            hosts: Vec::new(),
+    #[test]
+    fn cursors_wrap_and_an_empty_list_is_safe() {
+        assert_eq!(move_cursor(0, 3, 1), 1);
+        assert_eq!(move_cursor(2, 3, 1), 0);
+        assert_eq!(move_cursor(0, 3, -1), 2);
+        assert_eq!(move_cursor(4, 0, 1), 0);
+    }
+
+    #[test]
+    fn the_menu_keeps_pairing_while_a_host_is_connected() {
+        let settings = Settings {
+            hosts: vec![bluez::Host {
+                addr: Addr([0x11; 6]),
+                name: "Studio Mac".into(),
+                connected: true,
+            }],
             profiles: HashMap::new(),
             pairing: Profile::Pc,
-            cursor: 0,
             error: None,
         };
-        assert!(empty.at_pairing());
-        empty.move_cursor(1);
-        assert_eq!(empty.cursor, 0, "the pairing row is the only one");
-        assert_eq!(empty.rows(), 1);
+        let rows = settings.rows();
+        assert!(rows.iter().any(|row| matches!(row, MenuRow::Host(0))));
+        assert_eq!(rows.last(), Some(&MenuRow::Pair));
     }
 
     #[test]
@@ -2399,19 +1866,5 @@ mod tests {
         assert_eq!(Profile::from_key(" xbox\n"), Some(Profile::Xbox));
         assert_eq!(Profile::from_key("PC"), Some(Profile::Pc));
         assert_eq!(Profile::from_key("ds4"), None);
-    }
-
-    #[test]
-    fn a_hat_direction_lights_its_arrow_and_the_diagonals_beside_it() {
-        let mut s = hid::State {
-            hat: 1,
-            ..Default::default()
-        }; // up-right
-        assert!(lit(Control::Hat(0), &s));
-        assert!(lit(Control::Hat(2), &s));
-        assert!(!lit(Control::Hat(4), &s));
-        assert!(!lit(Control::Hat(6), &s));
-        s.hat = hid::HAT_CENTRED;
-        assert!(!lit(Control::Hat(0), &s));
     }
 }
