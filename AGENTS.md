@@ -17,9 +17,12 @@ Périmètre actuel :
 - **Hôtes** : macOS, Windows, Linux/SteamOS, Android, iPadOS.
 - **Profils HID** : PC (HID générique) et Xbox (identité Xbox Wireless
   Controller), choisis **par hôte** depuis les réglages.
-- **Navigation de l'app** : F1 (réglages), F2 (moniteur d'entrées), F1+F2
-  (quitter). Start et Select restent des boutons de la manette envoyés à
-  l'hôte.
+- **Navigation de l'app** : écran **Devices** comme accueil sans hôte. F1 ouvre
+  l'écran Devices depuis la vue controller ; F1+F2 maintenu 1,5 s l'ouvre aussi, avec HID
+  neutralisé pendant le maintien. Dans les écrans d'interface : D-pad, A, B
+  (F1 = retour, F2 = valider). Le jeu de boutons est neutralisé vers l'hôte
+  pendant ces écrans. Start et Select restent des boutons de manette.
+  Dans l'écran Devices, **B** quitte immédiatement l'application, sans confirmation.
 - **USB HID** : hors périmètre du MVP. Le noyau stock de la Brick ne compile
   probablement pas `f_hid` ; le Bluetooth est la voie principale.
 - **Installation** : manuelle d'abord ; documentation Pak Store préparée ensuite.
@@ -97,12 +100,12 @@ apps/brick-controller/
 │   ├── hid.rs
 │   ├── xbox.rs
 │   ├── ds4.rs
+│   ├── display.rs
 │   ├── rumble.rs
 │   ├── sdp.rs
 │   ├── pad.rs
 │   └── platform/
 │       ├── mod.rs
-│       ├── display.rs
 │       ├── input_trimui.rs
 │       ├── input_h700.rs        # plus tard
 │       ├── bluetooth_init.rs    # tg5040 / tg5050
@@ -157,6 +160,11 @@ Ne **jamais** installer dans `.system/` : ce dossier est remplacé à chaque mis
 - Toujours restaurer l'état à la sortie, y compris sur erreur : `trap EXIT
   INT TERM`.
 - Appeler la sous-commande `restore` du binaire.
+- Restaurer l'écran et les réglages NextUI avec
+  `$SYSTEM_PATH/bin/syncsettings.elf` à la sortie, quand il est disponible.
+- Basculer le gouverneur CPU en `powersave` avec
+  `$SYSTEM_PATH/bin/governor.sh` ; NextUI restaure son propre gouverneur à la
+  sortie du Pak.
 - Relancer le Bluetooth NextUI via `$SYSTEM_PATH/etc/bluetooth/bt_init.sh start`
   **uniquement si le Bluetooth était actif au lancement**.
 - Faire `sync` après toute écriture sur la carte FAT.
@@ -197,11 +205,16 @@ Sonde validée sur NextUI `NextUI-20261013-0`, noyau `4.9.191` :
 - Entrées : `TRIMUI Player1` sur `/dev/input/event3`, avec `ABS_X/Y/RX/RY`
   centrés, `ABS_Z/RZ` 0..255 et `ABS_HAT0X/Y`.
 - Pas de sticks analogiques.
-- F1/F2 : navigation de l'app (F1 réglages, F2 moniteur d'entrées, F1+F2
-  quitter). Non envoyés à l'hôte.
+- F1/F2 : touches de navigation de l'app (F1 menu/retour, F2 validation,
+  F1+F2 maintenu 1,5 s pour l'écran Devices). Non envoyées à l'hôte. Dans les écrans
+  d'interface, le D-pad et A/B sont aussi utilisés et neutralisés côté hôte.
 - Rumble : GPIO 227 + `/sys/class/motor/voltage` (3,3 V sur Brick standard),
   utilisé en mode Xbox par le rapport de sortie 0x03.
-- Rétroéclairage : `/dev/disp`, non utilisé par l'app.
+- Rétroéclairage : `/dev/disp`, ioctl `0x102` pour régler la luminosité brute
+  et `0x103` pour la relire. `0` éteint la dalle sans arrêter le framebuffer ni
+  le Bluetooth. La valeur est mémorisée dans
+  `$BRICK_CONTROLLER_DATA/screen-off` avant extinction, puis restaurée à la
+  sortie ou par `restore` après un crash.
 - Batterie : `/sys/class/power_supply/axp2202-battery/capacity`.
 - Bluetooth : `bluetoothd` lancé par procd via `/etc/bluetooth/bluetoothd`,
   `bluealsa` actif, `hciattach -n ttyS1 xradio`, `hciconfig` et `btmgmt`
@@ -240,22 +253,30 @@ Règles :
   SET_REPORT pilotent le moteur via `rumble.rs` (GPIO 227). Le mode PC n'a pas
   de rapport de sortie : aucune vibration.
 - Start et Select sont envoyés à l'hôte comme boutons de manette.
-- F1 ouvre les réglages (liste des hôtes appairés) ; F2 ouvre le moniteur
-  d'entrées ; F1+F2 maintenu 3 s quitte l'application. Pendant le maintien,
-  le pied de page affiche « keep holding to quit… ».
-- Dans les réglages : D-pad pour choisir, A pour connecter/déconnecter, F2 pour
-  basculer le profil de l'hôte sélectionné. Aucune action B « back ». Quand un
-  hôte est connecté, F1 revient à la vue controller. Les rapports HID sont
-  neutralisés pendant l'ouverture des réglages ou du moniteur.
-- La vue controller n'est affichée que lorsqu'un hôte est connecté ; sans
-  connexion, l'application reste sur la vue réglages.
-- Un changement de mode (PC/Xbox) reste sur la vue réglages, y compris quand
-  la session Bluetooth redémarre avec la nouvelle identité.
-- Le moniteur d'entrées ne se ferme qu'avec F2 ; le libellé de l'action est
-  « controller ».
-- Sans hôte appairé, les réglages affichent une ligne **Next pairing** : F2
-  choisit l'identité que verra le prochain hôte appairé.
-- Menu envoie Home/Guide à l'hôte ; l'appui long n'a plus d'action.
+- L'écran **Devices** est l'écran d'accueil sans hôte. Il liste les hôtes appairés et
+  **Pair a new device**. Chaque hôte ouvre un écran de détail :
+  connexion/déconnexion, type de contrôleur PC/Xbox et **Forget pairing**.
+- F1 ouvre l'écran Devices depuis la vue controller. F1+F2 maintenu 1,5 s l'ouvre
+  aussi : aucun rapport HID n'est envoyé pendant le maintien. Un overlay
+  « Keep holding to open devices… » montre la progression.
+- Dans l'écran Devices et ses sous-écrans, la navigation est celle de NextUI : D-pad,
+  A pour valider, B pour revenir dans un sous-écran. Dans l'écran Devices, B quitte
+  immédiatement l'application. F1 est un alias de retour et F2 de validation.
+  Les rapports HID sont neutralisés.
+- Au retour à la vue controller, les rapports restent neutres jusqu'au
+  relâchement de toutes les touches utilisées dans l'interface.
+- Le choix du type de contrôleur se fait par un écran de sélection PC/Xbox. Changer le
+  type de contrôleur de l'hôte courant supprime son appairage BlueZ et redémarre la
+  session avec la nouvelle identité ; l'écran Devices est réaffiché.
+- Sans hôte appairé, **Pair a new device** ouvre l'écran d'appairage ; X permet
+  de changer l'identité du prochain appairage.
+- À la connexion d'un hôte, la vue controller affiche l'hôte, le profil et les
+  derniers évènements de touches. Un compte à rebours de 10 s est affiché.
+  Après 10 s, le rétroéclairage passe à 0 ; les rapports HID continuent. Un
+  maintien de F1 ou F2 rallume l'écran sans déclencher l'action de la touche.
+- Ouvrir l'écran Devices annule l'extinction programmée.
+- Le bouton Menu envoie Home/Guide à l'hôte depuis la vue controller ; dans les écrans
+  d'interface, il est neutralisé.
 - Sur Brick standard, les sticks sont absents : le descripteur les déclare
   centrés pour rester compatible.
 
@@ -290,14 +311,16 @@ reconstruire avant le test.
 
 - appairage macOS, Windows, Linux ;
 - tous les boutons, D-pad, gâchettes, Start/Select, Menu ;
-- Menu : appui simple = Home/Guide, appui long sans effet ;
-- F1 pour les réglages, F2 pour le moniteur d'entrées, F1+F2 pour quitter ;
-- maintien F1+F2 : message « keep holding to quit… » puis sortie ;
-- F2 seul ferme le moniteur, libellé « controller » ;
-- vue réglages par défaut sans hôte, vue controller seulement connecté ;
-- changement de profil : la vue réglages reste affichée ;
-- aucune action B « back » dans les réglages ni le moniteur ;
-- défilement du moniteur d'entrées et affichage de la dernière commande ;
+- Menu (bouton) : appui simple = Home/Guide, appui long sans effet ;
+- F1 ouvre l'écran Devices ; F1+F2 maintenu 1,5 s l'ouvre aussi ;
+- maintien F1+F2 : overlay « Keep holding to open devices… », HID neutralisé ;
+- navigation Devices/sous-écrans avec D-pad/A/B ; F1 retour, F2 validation ;
+- B dans l'écran Devices quitte immédiatement, sans confirmation ;
+- Écran Devices par défaut sans hôte, vue controller seulement connecté ;
+- changement de type de contrôleur : confirmation, retour à l'écran Devices et réappairage ;
+- aucune fuite de D-pad/A/B/Menu/Start/Select vers l'hôte dans l'interface ;
+- compte à rebours de 10 s, extinction, rallumage par maintien F1 ou F2 ;
+- vue controller : derniers évènements de touches et profil ;
 - bascule PC/Xbox d'un hôte, redémarrage de session et réappairage ;
 - vibrations en mode Xbox : rapport 0x03 sur le canal interrupt et SET_REPORT,
   moteur arrêté à la déconnexion et à la sortie ;
@@ -327,6 +350,7 @@ Logs utiles : `$LOGS_PATH/BrickController.txt`, `dmesg`, `btmon`,
 | Copier Padpod sans licence/crédits | Violation GPL-3 | Garder LICENSE, credits et source |
 | Tester uniquement sur l'hôte | Bugs de framebuffer/entrées non vus | Tester sur la Brick |
 | Oublier `sync` après écriture FAT | État corrompu après coupure | `sync` dans le cleanup |
+| Éteindre `/dev/disp` sans mémoriser la luminosité | Écran noir après un crash | Fichier `screen-off`, `restore`, `syncsettings.elf` |
 
 ## Sécurité et récupération
 
@@ -338,6 +362,9 @@ Logs utiles : `$LOGS_PATH/BrickController.txt`, `dmesg`, `btmon`,
 - Ne jamais exécuter de commande destructive sans confirmation.
 - En cas de crash, le `launch.sh` doit pouvoir restaurer l'état via le marqueur
   `/tmp` et la sous-commande `restore`.
+- Vérifier après la sortie que l'écran n'est pas resté éteint : `restore`
+  applique la luminosité mémorisée, puis `syncsettings.elf` restaure celle de
+  NextUI.
 - Une coupure de courant ne doit pas laisser de modification persistante
   empêchant NextUI de redémarrer normalement.
 
@@ -349,8 +376,8 @@ Logs utiles : `$LOGS_PATH/BrickController.txt`, `dmesg`, `btmon`,
 - Renommer l'application : « Brick Controller », binaire `brick-controller`,
   jamais « Padpod ».
 - Indiquer qu'il s'agit d'une version modifiée.
-- Afficher le crédit d'auteur et le lien Padpod discrètement dans l'écran
-  Réglages, avec `NAME VERSION` ; ne pas les afficher sur l'écran principal.
+- Conserver le crédit d'auteur et le lien Padpod dans `CREDITS.md` et les
+  fichiers du pak ; ne pas les afficher sur l'écran principal.
   Conserver `LICENSE`, `ADDITIONAL-TERMS.md` et `CREDITS.md`.
 - Publier la source complète sous les mêmes termes.
 - Le code repris de deck-as-controller (MIT) conserve ses notices MIT.

@@ -15,24 +15,33 @@ installed on the host.
 - Standard Bluetooth HID gamepad: no host driver.
 - D-pad, A/B/X/Y, L1/L2/R1/R2, Start, Select and Menu.
 - Start and Select are passed to the host as normal gamepad buttons.
-- **F1** opens the settings screen.
-- **F2** opens a real-time input monitor. Every press and release, D-pad
-  direction, trigger value and stick movement is listed; the list scrolls so
-  the newest entry is always at the bottom. Only **F2** returns to the
-  controller view.
-- **F1+F2** held for three seconds quits the app; the footer says
-  "keep holding to quit…" while both are held.
-- The settings screen lists paired hosts. **A** connects a disconnected host or
-  disconnects the connected one; **F2** switches the selected host between the
-  PC and Xbox identities. With no paired host, a **Next pairing** row chooses
-  the identity the next host will see.
-- **MENU** tap sends Home/Guide.
+- The **Devices** screen is the app's home when no host is connected. It lists
+  paired hosts and the next pairing identity. **B** quits the app from the
+  Devices screen.
+- **F1** opens the Devices screen from the controller view. **F1+F2** held for 1.5 s
+  opens it too; gamepad input is neutralised while both keys are held.
+- Inside the Devices screen and its sub-screens, navigation follows NextUI: D-pad to move,
+  A to select. In a sub-screen, B goes back; on the Devices screen, B quits the app.
+  F1 is a Back alias and F2 a Select alias.
+- A host has one row in the Devices screen. Selecting it opens its detail screen:
+  connection, PC/Xbox controller type, and Forget pairing.
+- The controller view shows the host, the profile, and the recent button and
+  axis events. The input monitor is merged into this view.
+- The status bar shows the time, Bluetooth, Wi-Fi and battery state, using the
+  nextval colours and the NextUI font when they are available.
+- After a host connects, the panel switches off after 10 seconds while the
+  gamepad keeps working. Hold **F1** or **F2** to switch it back on; that hold
+  does not trigger the key's action.
+- **MENU** tap sends Home/Guide while the controller view is active.
 - Rumble in Xbox mode when the host sends output reports; the PC profile has
   no rumble output report.
-- The controller view is shown only while a host is connected. Without a
-  connection, the app stays on the settings screen.
+- Quit is immediate from the Devices screen with **B**. There is no quit row, no
+  confirmation dialog and no destructive quit chord.
 - Reconnects to the last host with the identity chosen for it.
-- Clean restore of NextUI's Bluetooth stack when the app exits.
+- Runs the CPU governor in `powersave` and draws no frames while the panel is
+  off, to keep battery use low.
+- Clean restore of NextUI's Bluetooth stack, panel brightness and mixer
+  settings when the app exits.
 
 ## Requirements
 
@@ -64,22 +73,24 @@ Use the **bottom USB-C port** for ADB. The top port is a USB host port.
 ## Use
 
 1. Turn Bluetooth on in NextUI.
-2. Open **Brick Controller** from Tools.
-3. On the host, open Bluetooth settings and pair with the name shown on the
-   Brick (`Brick Controller` by default).
-4. Press **F1** for settings; **F2** shows the input monitor.
-5. In settings, use the D-pad to select a host, **A** to connect/disconnect,
-   and **F2** to switch that host between PC and Xbox. When a host is
-   connected, **F1** returns to the controller view; without a host the
-   settings screen stays up.
-6. Tap **MENU** to send Home/Guide. Hold **F1+F2** for three seconds to quit.
+2. Open **Brick Controller** from Tools. With no host connected, the **Devices**
+   is the home screen.
+3. Select **Pair a new device**, then open Bluetooth settings on the host and
+   pair with the name shown on the Brick (`Brick Controller` by default).
+4. After pairing, the controller view shows the host, the profile and the
+   recent input events. The panel switches off after 10 seconds. Hold **F1** or
+   **F2** to light it again.
+5. Press **F1**, or hold **F1+F2** for 1.5 s, to open the Devices screen. Select a host
+   to connect or disconnect it, change its PC/Xbox controller type, or forget its
+   pairing. Press **B** in the Devices screen to quit the app.
+6. Tap **MENU** on the controller view to send Home/Guide.
 
 Start and Select are not used by the app; they reach the host as normal gamepad
-buttons.
+buttons. While the Devices screen or a sub-screen is open, gamepad input is kept away from the host.
 
-## Xbox and PC profiles
+## Xbox and PC controller types
 
-Each host has its own identity, chosen with **F2** on the settings screen:
+Each host has its own identity, chosen from **Controller type** in the host detail:
 
 - **PC** is a generic HID gamepad. It works with Windows, macOS,
   Linux/SteamOS, Android and iPadOS, and is the recommended default.
@@ -90,11 +101,12 @@ Each host has its own identity, chosen with **F2** on the settings screen:
 
 A host remembers the controller identity it first paired with. After changing a
 host from PC to Xbox or back, remove the old pairing on the host and pair again.
-Changing the profile of the host currently in use also forgets that pairing on
-the Brick, restarts Bluetooth with the new identity, keeps the settings screen
-open and waits for a fresh pairing. Hosts that are not currently connected keep
-their entry; forget them on the host before connecting them with their new
-profile.
+Changing the controller type of the host currently in use also forgets that pairing on
+the Brick, restarts Bluetooth with the new identity, returns to the Devices screen and
+waits for a fresh pairing. Hosts that are not currently connected keep their
+entry; forget them on the host before connecting them with their new controller type.
+The same controller type choice is available for the next pairing from **Pair a
+controller → Change controller type**.
 
 ## Limitations
 
@@ -126,6 +138,16 @@ or run:
 ```sh
 /mnt/SDCARD/.system/tg5040/etc/bluetooth/bt_init.sh start
 ```
+
+If the panel remains dark after a crash or a forced exit, hold **F1** or
+**F2** to wake it. `launch.sh` also restores the saved brightness and runs
+`syncsettings.elf` on exit; running
+
+```sh
+/mnt/SDCARD/.system/tg5040/bin/syncsettings.elf
+```
+
+restores NextUI's own brightness and volume settings.
 
 ## Build
 

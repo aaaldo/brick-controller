@@ -13,8 +13,9 @@
 //! the device they are not: tested on a PC, pushing right moved ABS_RX.
 
 use crate::hid::{self, button, State};
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{self, Read};
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, RawFd};
 
 const EV_SYN: u16 = 0;
@@ -61,6 +62,8 @@ struct AbsInfo {
     flat: i32,
     resolution: i32,
 }
+
+const EVENT_SIZE: usize = std::mem::size_of::<InputEvent>();
 
 /// EVIOCGABS(abs): _IOR('E', 0x40 + abs, struct input_absinfo).
 fn eviocgabs(abs: u16) -> libc::c_ulong {
@@ -176,7 +179,10 @@ impl Pad {
     /// Opened non-exclusively, as Truepod and Anipod do: spruce's own
     /// watchdogs read the same node for volume and brightness.
     pub fn open(path: &str) -> io::Result<Self> {
-        let file = File::open(path)?;
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(path)?;
         let mut ranges = Mapper::default().ranges;
         for (i, slot) in ranges.iter_mut().enumerate() {
             let mut info = AbsInfo::default();
@@ -187,23 +193,48 @@ impl Pad {
             }
         }
         eprintln!("pad: {path}, axis ranges {ranges:?}");
-        Ok(Self {
+        let mut pad = Self {
             file,
             mapper: Mapper::with_ranges(ranges),
             seen: Default::default(),
-        })
+        };
+        // Nothing else reads the gamepad node while the app is away, so events
+        // from the launcher can still be queued here. Replaying them would
+        // make an old F1/F2 press look like a fresh hold and open the quit
+        // chord; start from what happens after launch instead.
+        pad.drain()?;
+        Ok(pad)
+    }
+
+    fn drain(&mut self) -> io::Result<()> {
+        let mut buf = [0u8; EVENT_SIZE * 64];
+        loop {
+            match self.file.read(&mut buf) {
+                Ok(0) => return Ok(()),
+                Ok(_) => {}
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => return Ok(()),
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
+            }
+        }
     }
 
     /// Read whatever is waiting. True if a frame completed and the state may
     /// have changed. Call only after poll() says the node is readable.
     pub fn read(&mut self) -> io::Result<bool> {
-        let mut buf = [0u8; std::mem::size_of::<InputEvent>() * 16];
+        let mut buf = [0u8; EVENT_SIZE * 16];
         let n = match self.file.read(&mut buf) {
             Ok(n) => n,
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => return Ok(false),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
+                ) =>
+            {
+                return Ok(false)
+            }
             Err(e) => return Err(e),
         };
-        const EVENT_SIZE: usize = std::mem::size_of::<InputEvent>();
         let mut frame = false;
         for chunk in buf[..n].as_chunks::<EVENT_SIZE>().0 {
             let ev: InputEvent =
