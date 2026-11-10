@@ -9,3 +9,5 @@
 # Éditeurs
 .idea/
 .vscode/
+brick-ui-mockups
+.playwright-mcp
