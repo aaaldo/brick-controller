@@ -14,6 +14,38 @@ export HOME="$DIR"
 export BRICK_CONTROLLER_DATA="${USERDATA_PATH:-/tmp}/brick-controller"
 mkdir -p "$BRICK_CONTROLLER_DATA"
 
+# One instance only: the app owns the framebuffer, the HID PSMs and its own
+# bluetoothd. A leftover instance from a crash or a development launch would
+# make the new one fail with "Address in use" and show a misleading Bluetooth
+# error. Stop it first and let its wrapper restore the panel and Bluetooth.
+PIDFILE="/tmp/brick-controller-launch.pid"
+OLD_PID=""
+if [ -f "$PIDFILE" ]; then
+    OLD_PID=$(cat "$PIDFILE" 2>/dev/null)
+    case "$OLD_PID" in
+        ''|*[!0-9]*) OLD_PID="" ;;
+    esac
+fi
+OLD_APP=$(pidof brick-controller)
+if [ -n "$OLD_APP" ]; then
+    echo "launch: stopping previous instance ($OLD_APP)" >>"$LOG" 2>&1
+    kill $OLD_APP 2>/dev/null
+fi
+if [ -n "$OLD_PID" ] && [ "$OLD_PID" != "$$" ] && [ -d "/proc/$OLD_PID" ]; then
+    i=0
+    while [ -d "/proc/$OLD_PID" ] && [ "$i" -lt 10 ]; do
+        sleep 1
+        i=$((i + 1))
+    done
+    if [ -d "/proc/$OLD_PID" ]; then
+        kill -9 "$OLD_PID" 2>/dev/null
+    fi
+elif [ -n "$OLD_APP" ]; then
+    # Older builds did not write a PID file; leave time for their cleanup.
+    sleep 2
+fi
+echo "$$" >"$PIDFILE"
+
 # FAT refuses to replace a running executable. deploy.sh leaves the new build
 # beside the old one; promote it now that nothing is running.
 if [ -x "$DIR/brick-controller.next" ]; then
@@ -53,6 +85,9 @@ cleanup() {
         sh "$NEXTUI_BT_INIT" start >>"$LOG" 2>&1
     fi
     sync
+    if [ "$(cat "$PIDFILE" 2>/dev/null)" = "$$" ]; then
+        rm -f "$PIDFILE"
+    fi
 }
 trap cleanup EXIT INT TERM
 

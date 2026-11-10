@@ -284,7 +284,6 @@ pub struct Row {
     pub label: String,
     pub trailing: String,
     pub selected: bool,
-    pub chevron: bool,
 }
 
 impl Row {
@@ -293,13 +292,7 @@ impl Row {
             label: label.into(),
             trailing: trailing.into(),
             selected,
-            chevron: false,
         }
-    }
-
-    pub fn chevron(mut self) -> Self {
-        self.chevron = true;
-        self
     }
 }
 
@@ -336,14 +329,8 @@ pub enum View {
     Menu {
         rows: Vec<Row>,
     },
-    Host {
-        title: String,
-        rows: Vec<Row>,
-        note: String,
-    },
     Profile {
         rows: Vec<Row>,
-        show_note: bool,
     },
     Pairing {
         identity: String,
@@ -399,7 +386,7 @@ pub fn draw(
                 fonts,
                 theme,
                 &[item("B", "Quit")],
-                &[item("A", "Select")],
+                &[item("X", "Forget"), item("A", "Connect")],
             );
             if rows.is_empty() {
                 let text = "No paired device.";
@@ -413,46 +400,9 @@ pub fn draw(
                 );
             }
         }
-        View::Host { title, rows, note } => {
-            header(canvas, fonts, theme, status, title);
-            rows_at(canvas, fonts, theme, rows, 120);
-            if !note.is_empty() {
-                draw_wrapped(
-                    canvas,
-                    fonts,
-                    hint_text(theme),
-                    SMALL_SIZE,
-                    note,
-                    s(canvas, 30),
-                    s(canvas, 410),
-                    canvas.width() - s(canvas, 60),
-                    3,
-                );
-            }
-            footer(
-                canvas,
-                fonts,
-                theme,
-                &[item("B", "Back")],
-                &[item("A", "Select")],
-            );
-        }
-        View::Profile { rows, show_note } => {
+        View::Profile { rows } => {
             header(canvas, fonts, theme, status, "Controller type");
             rows_at(canvas, fonts, theme, rows, 120);
-            if *show_note {
-                draw_wrapped(
-                    canvas,
-                    fonts,
-                    hint_text(theme),
-                    SMALL_SIZE,
-                    "Changing the controller type requires the host to forget the old pairing.",
-                    s(canvas, 30),
-                    s(canvas, 410),
-                    canvas.width() - s(canvas, 60),
-                    3,
-                );
-            }
             footer(
                 canvas,
                 fonts,
@@ -479,8 +429,8 @@ pub fn draw(
                 canvas,
                 fonts,
                 theme,
-                &[item("B", "Back"), item("X", "Change controller type")],
-                &[],
+                &[item("B", "Back")],
+                &[item("X", "Change controller type")],
             );
         }
         View::Error {
@@ -669,50 +619,81 @@ fn draw_pairing(
 ) {
     let centre = canvas.width() / 2;
     let max_w = canvas.width() - s(canvas, 120);
-    let mut y = s(canvas, 150);
+    let lines = fonts.wrap(
+        "Open Bluetooth settings on your device and select this controller.",
+        ITEM_SIZE,
+        max_w,
+        3,
+    );
+    let line_step = s(canvas, 56);
+    let wait_w = s(canvas, 520);
+    let wait_h = s(canvas, 72);
+
+    // Centre the whole block between the status bar and the footer so the
+    // heading and the waiting pill keep the same breathing room. The last
+    // baseline is 24 px below the visual top of the first line.
+    let header_bottom = s(canvas, 105);
+    let footer_top = canvas.height() - s(canvas, 30) - s(canvas, 90);
+    let text_to_wait = s(canvas, 80);
+    let block_h =
+        s(canvas, 194) + lines.len().saturating_sub(1) as i32 * line_step + text_to_wait + wait_h;
+    let start = (header_bottom + footer_top) / 2 - block_h / 2 + s(canvas, 12);
+
     fonts.draw_centred(
         canvas,
         "VISIBLE AS",
         centre,
-        y,
+        start,
         SMALL_SIZE,
         hint_text(theme),
     );
-    y += s(canvas, 82);
-    fonts.draw_centred(canvas, identity, centre, y, TITLE_SIZE, theme.accent);
-    y += s(canvas, 48);
+    fonts.draw_centred(
+        canvas,
+        identity,
+        centre,
+        start + s(canvas, 82),
+        TITLE_SIZE,
+        theme.highlight,
+    );
     fonts.draw_centred(
         canvas,
         &format!("{controller_type} controller"),
         centre,
-        y,
+        start + s(canvas, 130),
         HINT_SIZE,
         hint_text(theme),
     );
-    y += s(canvas, 64);
-    let instructions = "On your PC, Mac, phone or tablet:\nopen Bluetooth settings and select this controller.\nNo PIN is required.";
-    for line in fonts.wrap(instructions, ITEM_SIZE, max_w, 3) {
-        fonts.draw_centred(canvas, &line, centre, y, ITEM_SIZE, theme.text);
-        y += s(canvas, 56);
+
+    let first_line = start + s(canvas, 194);
+    for (i, line) in lines.iter().enumerate() {
+        fonts.draw_centred(
+            canvas,
+            line,
+            centre,
+            first_line + i as i32 * line_step,
+            ITEM_SIZE,
+            theme.text,
+        );
     }
+
+    let wait_y = first_line + lines.len().saturating_sub(1) as i32 * line_step + text_to_wait;
     if let Some(host) = reconnecting {
         fonts.draw_centred(
             canvas,
             &format!("Reconnecting to {host}…"),
             centre,
-            y + s(canvas, 8),
+            wait_y - s(canvas, 26),
             SMALL_SIZE,
             hint_text(theme),
         );
     }
-    let wait_y = canvas.height() - s(canvas, 230);
-    let wait_w = s(canvas, 520);
-    let wait_h = s(canvas, 72);
-    let wait_x = centre - wait_w / 2;
+
+    // Main-colour pill with background-coloured text, like the selected rows.
     let waiting = PillStyle {
-        fill: theme.accent,
-        text: theme.button_label,
+        fill: theme.highlight,
+        text: theme.background,
     };
+    let wait_x = centre - wait_w / 2;
     round_rect(
         canvas,
         wait_x,
@@ -814,9 +795,7 @@ fn rows_at(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, rows: &[Row], 
             hint_text(theme)
         };
         let mut label_w = width - s(canvas, 60);
-        if row.chevron {
-            label_w -= s(canvas, 38);
-        } else if !row.trailing.is_empty() {
+        if !row.trailing.is_empty() {
             label_w -= fonts.measure(&row.trailing, SMALL_SIZE) + s(canvas, 30);
         }
         let label = fonts.ellipsize(&row.label, ITEM_SIZE, label_w.max(1));
@@ -828,15 +807,7 @@ fn rows_at(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, rows: &[Row], 
             ITEM_SIZE,
             colour,
         );
-        if row.chevron {
-            draw_chevron(
-                canvas,
-                left + width - s(canvas, 42),
-                y + row_h / 2,
-                s(canvas, 28),
-                trailing_colour,
-            );
-        } else if !row.trailing.is_empty() {
+        if !row.trailing.is_empty() {
             let tw = fonts.measure(&row.trailing, SMALL_SIZE);
             fonts.draw(
                 canvas,
@@ -848,23 +819,6 @@ fn rows_at(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, rows: &[Row], 
             );
         }
     }
-}
-
-fn draw_chevron(canvas: &mut Canvas, x: i32, cy: i32, size: i32, colour: Rgb) {
-    stroke(
-        canvas,
-        (x, cy - size),
-        (x + size / 2, cy),
-        s(canvas, 4),
-        colour,
-    );
-    stroke(
-        canvas,
-        (x + size / 2, cy),
-        (x, cy + size),
-        s(canvas, 4),
-        colour,
-    );
 }
 
 fn footer(
@@ -1093,29 +1047,6 @@ fn draw_hold(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, progress: f3
 }
 
 #[allow(clippy::too_many_arguments)]
-fn draw_wrapped(
-    canvas: &mut Canvas,
-    fonts: &mut Fonts,
-    colour: Rgb,
-    size: f32,
-    text: &str,
-    x: i32,
-    y: i32,
-    max_w: i32,
-    max_lines: usize,
-) {
-    for (i, line) in fonts.wrap(text, size, max_w, max_lines).iter().enumerate() {
-        fonts.draw(
-            canvas,
-            line,
-            x,
-            y + i as i32 * (size as i32 + s(canvas, 8)),
-            size,
-            colour,
-        );
-    }
-}
-
 fn draw_status(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, status: &StatusInfo) {
     let width = status_bar_width(canvas, fonts, status);
     let margin = s(canvas, 30);

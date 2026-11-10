@@ -451,18 +451,25 @@ fn run() -> Result<(), String> {
     let screen = Renderer::spawn(canvas, fonts, theme);
     let mut profile = saved_host().map(profile_for).unwrap_or_else(last_profile);
     let mut start_in_menu = false;
+    // No host is reached until the user asks for it from Devices.
+    let mut connect = None;
     loop {
         save_last_profile(profile);
-        match session(profile, start_in_menu, &screen, &mut pad)? {
+        match session(profile, start_in_menu, connect, &screen, &mut pad)? {
             SessionOutcome::Quit => break,
-            SessionOutcome::SwitchProfile(next) => {
+            SessionOutcome::SwitchProfile {
+                profile: next,
+                connect: next_connect,
+            } => {
                 profile = next;
+                connect = next_connect;
                 eprintln!("profile: {}", profile.label());
                 // A profile change comes from the menu; reopen it across the
                 // Bluetooth restart.
                 start_in_menu = true;
             }
             SessionOutcome::Retry => {
+                connect = None;
                 start_in_menu = true;
             }
         }
@@ -492,38 +499,15 @@ enum MenuRow {
 #[derive(Clone, PartialEq, Eq)]
 enum Screen {
     Controller,
-    Menu {
-        cursor: usize,
-    },
-    Host {
-        index: usize,
-        cursor: usize,
-        note: String,
-    },
-    Profile {
-        target: ProfileTarget,
-        choice: Profile,
-    },
-    Pairing {
-        back: bool,
-    },
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ProfileTarget {
-    Host(usize),
-    NextPairing,
+    Menu { cursor: usize },
+    Profile { choice: Profile },
+    Pairing { back: bool },
 }
 
 /// A modal waiting for A or B.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ModalState {
-    Disconnect(usize),
     Forget(usize),
-    ProfileChange {
-        target: ProfileTarget,
-        next: Profile,
-    },
 }
 
 type DrawKey = (View, StatusInfo, Option<Modal>, Option<u8>);
@@ -644,11 +628,11 @@ impl Settings {
         }
     }
 
-    fn rows(&self, linked: bool) -> Vec<MenuRow> {
+    /// Devices always ends with "Pair a new device", even while a host is
+    /// connected: connecting and pairing are explicit choices on this screen.
+    fn rows(&self) -> Vec<MenuRow> {
         let mut rows: Vec<MenuRow> = (0..self.hosts.len()).map(MenuRow::Host).collect();
-        if !linked {
-            rows.push(MenuRow::Pair);
-        }
+        rows.push(MenuRow::Pair);
         rows
     }
 
@@ -659,7 +643,10 @@ impl Settings {
 
 enum SessionOutcome {
     Quit,
-    SwitchProfile(Profile),
+    SwitchProfile {
+        profile: Profile,
+        connect: Option<Addr>,
+    },
     Retry,
 }
 
@@ -685,11 +672,51 @@ fn drive_rumble(motor: Option<&rumble::Rumble>, report: &[u8]) {
     }
 }
 
+/// End the active link, a half-open pairing channel and any connect attempt.
+/// Devices is a chooser, so nothing may keep running while it is open.
+fn stop_devices_session(
+    link: &mut Option<Link>,
+    half: &mut Option<(Channel, Addr)>,
+    bus: &bluez::Bus,
+    target: &Arc<Mutex<Option<Addr>>>,
+    connected: &Arc<AtomicBool>,
+    motor: Option<&rumble::Rumble>,
+) {
+    if let Some(l) = link.take() {
+        let _ = bus.disconnect(l.host);
+        eprintln!("link: {} disconnected for Devices", l.name);
+    }
+    half.take();
+    *target.lock().unwrap() = None;
+    // No address survives in the file: the next start must not look for a host.
+    save_host(None);
+    connected.store(false, Ordering::Relaxed);
+    if let Some(motor) = motor {
+        motor.set(0);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn open_devices(
+    link: &mut Option<Link>,
+    half: &mut Option<(Channel, Addr)>,
+    bus: &bluez::Bus,
+    settings: &mut Settings,
+    profile: Profile,
+    target: &Arc<Mutex<Option<Addr>>>,
+    connected: &Arc<AtomicBool>,
+    motor: Option<&rumble::Rumble>,
+) {
+    stop_devices_session(link, half, bus, target, connected, motor);
+    *settings = Settings::load(bus, profile);
+}
+
 /// Bluetooth up as the chosen controller, until F1+F2 is held or another host
 /// profile is selected.
 fn session(
     profile: Profile,
     start_in_settings: bool,
+    connect: Option<Addr>,
     screen: &Renderer,
     pad: &mut pad::Pad,
 ) -> Result<SessionOutcome, String> {
@@ -717,7 +744,10 @@ fn session(
         Listener::bind(sdp::PSM_CONTROL).and_then(|c| Ok((c, Listener::bind(sdp::PSM_INTERRUPT)?)));
     let (control_listener, interrupt_listener) = match listeners {
         Ok(pair) => pair,
-        Err(e) => return fail(screen, pad, format!("could not open the HID channels: {e}")),
+        // A socket already in use is not a Bluetooth-off condition: another
+        // instance or a stale listener owns the HID PSMs. Exit cleanly so the
+        // wrapper restores the system instead of showing the recovery screen.
+        Err(e) => return Err(format!("could not open the HID channels: {e}")),
     };
     let _ = control_listener.set_nonblocking();
     let _ = interrupt_listener.set_nonblocking();
@@ -735,7 +765,7 @@ fn session(
         Profile::Pc => None,
     };
 
-    let target = Arc::new(Mutex::new(saved_host()));
+    let target = Arc::new(Mutex::new(connect));
     let connected = Arc::new(AtomicBool::new(false));
     let (reconnected_tx, reconnected) = mpsc::channel();
     let stop = Arc::new(AtomicBool::new(false));
@@ -765,8 +795,10 @@ fn session(
     let mut modal: Option<ModalState> = None;
     let mut events = InputMonitor::new();
     // The profile to switch to. A switch always comes from the menu, so the
-    // new session reopens it.
+    // new session reopens it. The host is reconnected only when the switch was
+    // part of an explicit Connect.
     let mut switch_to: Option<Profile> = None;
+    let mut switch_connect: Option<Addr> = None;
     let mut drawn: Option<DrawKey> = None;
     let mut backlight = display::Backlight::open();
     // A dark panel is woken only by holding a function key; `wake_used` keeps
@@ -781,9 +813,11 @@ fn session(
     let mut last_ui_active = true;
 
     let outcome = 'session: loop {
-        // Discoverable only while nothing is connected: a gamepad in use has
-        // no reason to answer every scan in the room.
-        let want_discoverable = link.is_none();
+        // Only the pairing screen advertises and accepts a new host. Devices
+        // and its sub-screens stay quiet so nothing connects behind the
+        // user's back; an explicit Connect goes through the reconnector.
+        let pairing_screen = matches!(state, Screen::Pairing { .. });
+        let want_discoverable = pairing_screen;
         if discoverable != Some(want_discoverable) {
             if let Err(e) = bus.set_discoverable(want_discoverable) {
                 eprintln!("bluez: {e}");
@@ -847,33 +881,48 @@ fn session(
         }
 
         // New connections: the host opens control first, then interrupt.
+        // Outside the pairing screen the channels are accepted and dropped so
+        // a stale peer cannot reconnect on its own.
         if let Ok(Some((control, host))) = control_listener.accept() {
-            eprintln!("link: control channel from {host}");
-            half = Some((control, host));
+            if pairing_screen {
+                eprintln!("link: control channel from {host}");
+                half = Some((control, host));
+            } else {
+                eprintln!("link: control channel from {host} outside pairing; dropped");
+            }
         }
         if let Ok(Some((interrupt, host))) = interrupt_listener.accept() {
-            match half.take() {
-                Some((control, from)) if from == host => {
-                    link = Some(Link {
-                        control,
-                        interrupt,
-                        name: String::new(),
-                        host,
-                    });
+            if !pairing_screen {
+                eprintln!("link: interrupt channel from {host} outside pairing; dropped");
+            } else {
+                match half.take() {
+                    Some((control, from)) if from == host => {
+                        link = Some(Link {
+                            control,
+                            interrupt,
+                            name: String::new(),
+                            host,
+                        });
+                    }
+                    _ => eprintln!(
+                        "link: interrupt channel from {host} with no control channel; dropped"
+                    ),
                 }
-                _ => eprintln!(
-                    "link: interrupt channel from {host} with no control channel; dropped"
-                ),
             }
         }
         if let Ok((control, interrupt, host)) = reconnected.try_recv() {
-            if link.is_none() {
+            // The user may have left Devices, or chosen another host, while
+            // this attempt was paging: a stale link must not come up behind
+            // the screen that cancelled it.
+            if link.is_none() && *target.lock().unwrap() == Some(host) {
                 link = Some(Link {
                     control,
                     interrupt,
                     name: String::new(),
                     host,
                 });
+            } else {
+                eprintln!("link: stale reconnection to {host} dropped");
             }
         }
         if let Some(l) = link.as_mut().filter(|l| l.name.is_empty()) {
@@ -959,11 +1008,18 @@ fn session(
             if let Some(l) = link.take() {
                 eprintln!("link: {} disconnected", l.name);
             }
-            connected.store(false, Ordering::Relaxed);
-            // A host that goes away must not leave the motor running.
-            if let Some(motor) = &motor {
-                motor.set(0);
-            }
+            // A host that goes away must not leave the motor running, and
+            // Devices must not keep paging it.
+            open_devices(
+                &mut link,
+                &mut half,
+                &bus,
+                &mut settings,
+                profile,
+                &target,
+                &connected,
+                motor.as_ref(),
+            );
             // The menu now shows the new state; a dark panel must come back
             // so the user can see why the link went away.
             if screen_off {
@@ -972,7 +1028,6 @@ fn session(
                 wake_since = None;
                 wake_used = false;
             }
-            settings = Settings::load(&bus, profile);
             state = Screen::Menu { cursor: 0 };
             modal = None;
             events = InputMonitor::new();
@@ -1038,6 +1093,16 @@ fn session(
                 chord_seen = true;
                 let since = chord_since.get_or_insert_with(Instant::now);
                 if since.elapsed() >= MENU_CHORD_HOLD && matches!(state, Screen::Controller) {
+                    open_devices(
+                        &mut link,
+                        &mut half,
+                        &bus,
+                        &mut settings,
+                        profile,
+                        &target,
+                        &connected,
+                        motor.as_ref(),
+                    );
                     state = Screen::Menu { cursor: 0 };
                     modal = None;
                     events = InputMonitor::new();
@@ -1058,84 +1123,23 @@ fn session(
                 if let Some(pending) = modal {
                     if confirm {
                         match pending {
-                            ModalState::Disconnect(index) => {
-                                if let Some(host) = settings.hosts.get(index) {
-                                    let addr = host.addr;
-                                    eprintln!("menu: disconnect {addr}");
-                                    if link.as_ref().is_some_and(|l| l.host == addr) {
-                                        let _ = bus.disconnect(addr);
-                                        link = None;
-                                    } else {
-                                        let _ = bus.disconnect(addr);
-                                    }
-                                    save_host(None);
-                                    *target.lock().unwrap() = None;
-                                    connected.store(false, Ordering::Relaxed);
-                                    if let Some(motor) = &motor {
-                                        motor.set(0);
-                                    }
-                                    settings = Settings::load(&bus, profile);
-                                    state = Screen::Menu { cursor: 0 };
-                                }
-                                modal = None;
-                                drawn = None;
-                            }
                             ModalState::Forget(index) => {
                                 if let Some(host) = settings.hosts.get(index) {
                                     let addr = host.addr;
                                     eprintln!("menu: forget {addr}");
-                                    if link.as_ref().is_some_and(|l| l.host == addr) {
-                                        let _ = bus.disconnect(addr);
-                                        link = None;
-                                    }
+                                    stop_devices_session(
+                                        &mut link,
+                                        &mut half,
+                                        &bus,
+                                        &target,
+                                        &connected,
+                                        motor.as_ref(),
+                                    );
                                     let _ = bus.remove(addr);
                                     settings.profiles.remove(&addr);
                                     save_profiles(&settings.profiles);
-                                    if *target.lock().unwrap() == Some(addr) {
-                                        *target.lock().unwrap() = None;
-                                        save_host(None);
-                                    }
-                                    connected.store(false, Ordering::Relaxed);
-                                    if let Some(motor) = &motor {
-                                        motor.set(0);
-                                    }
                                     settings = Settings::load(&bus, profile);
                                     state = Screen::Menu { cursor: 0 };
-                                }
-                                modal = None;
-                                drawn = None;
-                            }
-                            ModalState::ProfileChange {
-                                target: which,
-                                next,
-                            } => {
-                                match which {
-                                    ProfileTarget::Host(index) => {
-                                        if let Some(host) = settings.hosts.get(index) {
-                                            let addr = host.addr;
-                                            settings.profiles.insert(addr, next);
-                                            save_profiles(&settings.profiles);
-                                            if link.as_ref().is_some_and(|l| l.host == addr) {
-                                                let _ = bus.disconnect(addr);
-                                                link = None;
-                                            }
-                                            let _ = bus.remove(addr);
-                                            save_host(None);
-                                            *target.lock().unwrap() = None;
-                                            connected.store(false, Ordering::Relaxed);
-                                            if let Some(motor) = &motor {
-                                                motor.set(0);
-                                            }
-                                            switch_to = Some(next);
-                                            state = Screen::Menu { cursor: 0 };
-                                        }
-                                    }
-                                    ProfileTarget::NextPairing => {
-                                        settings.pairing = next;
-                                        save_last_profile(next);
-                                        switch_to = Some(next);
-                                        state = Screen::Menu { cursor: 0 };
-                                    }
                                 }
                                 modal = None;
                                 drawn = None;
@@ -1148,7 +1152,7 @@ fn session(
                 } else {
                     match state.clone() {
                         Screen::Menu { cursor } => {
-                            let rows = settings.rows(link.is_some());
+                            let rows = settings.rows();
                             let cursor = cursor.min(rows.len().saturating_sub(1));
                             if let Some(dir) = direction {
                                 let delta = match dir {
@@ -1169,15 +1173,53 @@ fn session(
                                 }
                                 break 'session SessionOutcome::Quit;
                             }
+                            if x_pressed {
+                                if let Some(MenuRow::Host(index)) = rows.get(cursor).copied() {
+                                    // Forget is decided on this screen; a
+                                    // pending Connect must not win the race.
+                                    stop_devices_session(
+                                        &mut link,
+                                        &mut half,
+                                        &bus,
+                                        &target,
+                                        &connected,
+                                        motor.as_ref(),
+                                    );
+                                    modal = Some(ModalState::Forget(index));
+                                    drawn = None;
+                                }
+                            }
                             if confirm {
                                 if let Some(row) = rows.get(cursor).copied() {
+                                    // Connect is always a fresh choice from
+                                    // this screen, never a resumed link.
+                                    stop_devices_session(
+                                        &mut link,
+                                        &mut half,
+                                        &bus,
+                                        &target,
+                                        &connected,
+                                        motor.as_ref(),
+                                    );
                                     match row {
                                         MenuRow::Host(index) => {
-                                            state = Screen::Host {
-                                                index,
-                                                cursor: 0,
-                                                note: String::new(),
-                                            };
+                                            if let Some(host) = settings.hosts.get(index) {
+                                                let addr = host.addr;
+                                                let desired = settings.profile_for(addr);
+                                                eprintln!(
+                                                    "menu: connect {addr} as {}",
+                                                    desired.label()
+                                                );
+                                                bus.trust(addr);
+                                                save_host(Some(addr));
+                                                *target.lock().unwrap() = Some(addr);
+                                                if desired != profile {
+                                                    switch_to = Some(desired);
+                                                    switch_connect = Some(addr);
+                                                } else {
+                                                    state = Screen::Menu { cursor: index };
+                                                }
+                                            }
                                         }
                                         MenuRow::Pair => state = Screen::Pairing { back: true },
                                     }
@@ -1188,77 +1230,7 @@ fn session(
                                 drawn = None;
                             }
                         }
-                        Screen::Host {
-                            index,
-                            cursor,
-                            note,
-                        } => {
-                            let rows = 3;
-                            if let Some(dir) = direction {
-                                let delta = match dir {
-                                    Dir::Up => -1,
-                                    Dir::Down => 1,
-                                    _ => 0,
-                                };
-                                if delta != 0 {
-                                    state = Screen::Host {
-                                        index,
-                                        cursor: move_cursor(cursor, rows, delta),
-                                        note,
-                                    };
-                                    drawn = None;
-                                }
-                            }
-                            if let Some(host) = settings.hosts.get(index) {
-                                let addr = host.addr;
-                                let host_connected = host.connected;
-                                let desired = settings.profile_for(addr);
-                                if confirm {
-                                    match cursor {
-                                        0 if host_connected => {
-                                            modal = Some(ModalState::Disconnect(index));
-                                        }
-                                        0 => {
-                                            eprintln!(
-                                                "menu: connect {addr} as {}",
-                                                desired.label()
-                                            );
-                                            if let Some(l) = link.take() {
-                                                let _ = bus.disconnect(l.host);
-                                                connected.store(false, Ordering::Relaxed);
-                                            }
-                                            bus.trust(addr);
-                                            save_host(Some(addr));
-                                            *target.lock().unwrap() = Some(addr);
-                                            if desired != profile {
-                                                switch_to = Some(desired);
-                                            } else {
-                                                state = Screen::Menu { cursor: index };
-                                            }
-                                        }
-                                        1 => {
-                                            state = Screen::Profile {
-                                                target: ProfileTarget::Host(index),
-                                                choice: desired,
-                                            };
-                                        }
-                                        2 => modal = Some(ModalState::Forget(index)),
-                                        _ => {}
-                                    }
-                                    drawn = None;
-                                } else if back {
-                                    state = Screen::Menu { cursor: index };
-                                    drawn = None;
-                                }
-                            } else {
-                                state = Screen::Menu { cursor: 0 };
-                                drawn = None;
-                            }
-                        }
-                        Screen::Profile {
-                            target: which,
-                            choice,
-                        } => {
+                        Screen::Profile { choice } => {
                             if let Some(dir) = direction {
                                 let step = match dir {
                                     Dir::Up => -1,
@@ -1275,73 +1247,42 @@ fn session(
                                         .rem_euclid(Profile::ALL.len() as isize)
                                         as usize;
                                     state = Screen::Profile {
-                                        target: which,
                                         choice: Profile::ALL[next],
                                     };
                                     drawn = None;
                                 }
                             }
                             if confirm {
-                                match which {
-                                    ProfileTarget::Host(index) => {
-                                        if let Some(host) = settings.hosts.get(index) {
-                                            let addr = host.addr;
-                                            let current = settings.profile_for(addr);
-                                            if choice == current {
-                                                state = Screen::Host {
-                                                    index,
-                                                    cursor: 1,
-                                                    note: String::new(),
-                                                };
-                                            } else if link.as_ref().is_some_and(|l| l.host == addr)
-                                                || *target.lock().unwrap() == Some(addr)
-                                            {
-                                                modal = Some(ModalState::ProfileChange {
-                                                    target: which,
-                                                    next: choice,
-                                                });
-                                            } else {
-                                                settings.profiles.insert(addr, choice);
-                                                save_profiles(&settings.profiles);
-                                                state = Screen::Host {
-                                                    index,
-                                                    cursor: 1,
-                                                    note: "Profile saved. Forget the old pairing on the host before reconnecting.".into(),
-                                                };
-                                            }
-                                        }
-                                    }
-                                    ProfileTarget::NextPairing => {
-                                        if choice != settings.pairing {
-                                            settings.pairing = choice;
-                                            save_last_profile(choice);
-                                            switch_to = Some(choice);
-                                        } else {
-                                            state = Screen::Pairing { back: true };
-                                        }
-                                    }
+                                if choice != settings.pairing {
+                                    settings.pairing = choice;
+                                    save_last_profile(choice);
+                                    switch_to = Some(choice);
+                                } else {
+                                    state = Screen::Pairing { back: true };
                                 }
                                 drawn = None;
                             } else if back {
-                                state = match which {
-                                    ProfileTarget::Host(index) => Screen::Host {
-                                        index,
-                                        cursor: 1,
-                                        note: String::new(),
-                                    },
-                                    ProfileTarget::NextPairing => Screen::Pairing { back: true },
-                                };
+                                state = Screen::Pairing { back: true };
                                 drawn = None;
                             }
                         }
                         Screen::Pairing { back: can_back } => {
                             if x_pressed {
                                 state = Screen::Profile {
-                                    target: ProfileTarget::NextPairing,
                                     choice: settings.pairing,
                                 };
                                 drawn = None;
                             } else if back && can_back {
+                                open_devices(
+                                    &mut link,
+                                    &mut half,
+                                    &bus,
+                                    &mut settings,
+                                    profile,
+                                    &target,
+                                    &connected,
+                                    motor.as_ref(),
+                                );
                                 state = Screen::Menu { cursor: 0 };
                                 drawn = None;
                             }
@@ -1350,6 +1291,16 @@ fn session(
                             // F1 is the short way to the menu; the F1+F2 hold
                             // is handled above, before this match.
                             if f1_released {
+                                open_devices(
+                                    &mut link,
+                                    &mut half,
+                                    &bus,
+                                    &mut settings,
+                                    profile,
+                                    &target,
+                                    &connected,
+                                    motor.as_ref(),
+                                );
                                 state = Screen::Menu { cursor: 0 };
                                 events = InputMonitor::new();
                                 screen_off_at = None;
@@ -1385,7 +1336,10 @@ fn session(
         }
 
         if let Some(next) = switch_to {
-            break 'session SessionOutcome::SwitchProfile(next);
+            break 'session SessionOutcome::SwitchProfile {
+                profile: next,
+                connect: switch_connect,
+            };
         }
 
         let ui_active = !matches!(state, Screen::Controller) || modal.is_some();
@@ -1440,17 +1394,22 @@ fn session(
             if let Some(l) = link.take() {
                 eprintln!("link: {} disconnected while sending", l.name);
             }
-            connected.store(false, Ordering::Relaxed);
-            if let Some(motor) = &motor {
-                motor.set(0);
-            }
+            open_devices(
+                &mut link,
+                &mut half,
+                &bus,
+                &mut settings,
+                profile,
+                &target,
+                &connected,
+                motor.as_ref(),
+            );
             if screen_off {
                 backlight.on();
                 screen_off = false;
                 wake_since = None;
                 wake_used = false;
             }
-            settings = Settings::load(&bus, profile);
             state = Screen::Menu { cursor: 0 };
             modal = None;
             events = InputMonitor::new();
@@ -1564,8 +1523,7 @@ fn view_for(
             countdown,
         },
         Screen::Menu { cursor } => {
-            let linked = link.is_some();
-            let rows = settings.rows(linked);
+            let rows = settings.rows();
             let cursor = (*cursor).min(rows.len().saturating_sub(1));
             let start = cursor.saturating_sub(4);
             let rows = rows
@@ -1596,41 +1554,12 @@ fn view_for(
                 .collect();
             View::Menu { rows }
         }
-        Screen::Host {
-            index,
-            cursor,
-            note,
-        } => {
-            let Some(host) = settings.hosts.get(*index) else {
-                return View::Menu { rows: Vec::new() };
-            };
-            let profile = settings.profile_for(host.addr);
-            let rows = vec![
-                Row::new(
-                    "Connection",
-                    if host.connected {
-                        "Connected"
-                    } else {
-                        "Disconnected"
-                    },
-                    *cursor == 0,
-                ),
-                Row::new("Controller type", profile.label(), *cursor == 1),
-                Row::new("Forget pairing", "", *cursor == 2).chevron(),
-            ];
-            View::Host {
-                title: host.name.clone(),
-                rows,
-                note: note.clone(),
-            }
-        }
-        Screen::Profile { target, choice } => {
-            let show_note = matches!(target, ProfileTarget::Host(_));
+        Screen::Profile { choice } => {
             let rows = Profile::ALL
                 .iter()
                 .map(|profile| Row::new(profile.label(), "", *profile == *choice))
                 .collect();
-            View::Profile { rows, show_note }
+            View::Profile { rows }
         }
         Screen::Pairing { .. } => View::Pairing {
             identity: settings.pairing.bt_name().into(),
@@ -1642,19 +1571,6 @@ fn view_for(
 
 fn modal_view(modal: &ModalState, settings: &Settings) -> Modal {
     match modal {
-        ModalState::Disconnect(index) => {
-            let name = settings
-                .hosts
-                .get(*index)
-                .map(|host| host.name.clone())
-                .unwrap_or_else(|| "this host".into());
-            Modal {
-                title: format!("Disconnect from {name}?"),
-                message: "The controller will stop sending input to this host.".into(),
-                confirm: "Disconnect",
-                destructive: false,
-            }
-        }
         ModalState::Forget(index) => {
             let name = settings
                 .hosts
@@ -1668,12 +1584,6 @@ fn modal_view(modal: &ModalState, settings: &Settings) -> Modal {
                 destructive: true,
             }
         }
-        ModalState::ProfileChange { next, .. } => Modal {
-            title: format!("Switch to {}?", next.label()),
-            message: "The host must forget the old pairing and pair again.".into(),
-            confirm: "Switch",
-            destructive: false,
-        },
     }
 }
 
@@ -1766,9 +1676,7 @@ mod tests {
             ),
             Row::new("iPhone", "Xbox · Offline", false),
         ];
-        if !linked {
-            rows.push(Row::new("Pair a new device", "PC", false));
-        }
+        rows.push(Row::new("Pair a new device", "PC", false));
         rows
     }
 
@@ -1823,23 +1731,9 @@ mod tests {
                 preview_status(true),
             ),
             (
-                "host",
-                View::Host {
-                    title: "MacBook Pro".into(),
-                    rows: vec![
-                        Row::new("Connection", "Connected", true),
-                        Row::new("Controller type", "PC", false),
-                        Row::new("Forget pairing", "", false).chevron(),
-                    ],
-                    note: "Changes apply to this host only.".into(),
-                },
-                preview_status(true),
-            ),
-            (
                 "profile",
                 View::Profile {
                     rows: vec![Row::new("PC", "", true), Row::new("Xbox", "", false)],
-                    show_note: true,
                 },
                 preview_status(true),
             ),
@@ -1948,7 +1842,7 @@ mod tests {
     }
 
     #[test]
-    fn the_menu_hides_pairing_while_a_host_is_connected() {
+    fn the_menu_keeps_pairing_while_a_host_is_connected() {
         let settings = Settings {
             hosts: vec![bluez::Host {
                 addr: Addr([0x11; 6]),
@@ -1959,11 +1853,9 @@ mod tests {
             pairing: Profile::Pc,
             error: None,
         };
-        let linked = settings.rows(true);
-        assert!(linked.iter().any(|row| matches!(row, MenuRow::Host(0))));
-        assert!(!linked.iter().any(|row| matches!(row, MenuRow::Pair)));
-        let idle = settings.rows(false);
-        assert!(idle.iter().any(|row| matches!(row, MenuRow::Pair)));
+        let rows = settings.rows();
+        assert!(rows.iter().any(|row| matches!(row, MenuRow::Host(0))));
+        assert_eq!(rows.last(), Some(&MenuRow::Pair));
     }
 
     #[test]

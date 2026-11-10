@@ -168,6 +168,9 @@ Ne **jamais** installer dans `.system/` : ce dossier est remplacé à chaque mis
 - Relancer le Bluetooth NextUI via `$SYSTEM_PATH/etc/bluetooth/bt_init.sh start`
   **uniquement si le Bluetooth était actif au lancement**.
 - Faire `sync` après toute écriture sur la carte FAT.
+- Garantir une seule instance : arrêter l'instance précédente, attendre la fin
+  de son cleanup, puis démarrer. Le PID du wrapper est conservé dans
+  `/tmp/brick-controller-launch.pid` et supprimé à la sortie.
 - Ne pas laisser le rétroéclairage, le moteur ou `bluetoothd` dans un état
   intermédiaire.
 
@@ -236,55 +239,64 @@ Règles :
 - **Xbox** : identité Xbox Wireless Controller (`045E:02FD`) pour XInput sous
   Windows et la prise en charge Xbox native sur macOS, iPadOS et Android.
 - Le profil est stocké **par hôte** dans `$BRICK_CONTROLLER_DATA/profiles`
-  (`ADDR=pc` ou `ADDR=xbox`). L'identité réellement utilisée à la première
-  connexion est mémorisée pour cet hôte.
+  (`ADDR=pc` ou `ADDR=xbox`). L'identité utilisée au premier appairage est
+  mémorisée pour cet hôte et réutilisée pour le reconnecter.
 - Le dernier profil utilisé est conservé dans `$BRICK_CONTROLLER_DATA/mode` :
-  il sert de valeur par défaut à un hôte inconnu et survit à un redémarrage
-  avant le réappairage.
-- Changer le profil de l'hôte **actuellement utilisé** oublie son appairage
-  BlueZ, efface l'hôte mémorisé et redémarre la session Bluetooth avec la
-  nouvelle identité ; l'hôte doit supprimer l'ancien appairage puis réappairer.
-- Changer le profil d'un autre hôte enregistre le choix ; il sera appliqué à la
-  prochaine connexion de cet hôte. L'ancien appairage doit être supprimé sur
-  l'hôte avant de le reconnecter.
+  il sert de valeur par défaut au prochain appairage et survit à un
+  redémarrage avant le réappairage.
+- Le profil d'un hôte **ne se modifie plus depuis Devices**. Le type PC/Xbox se
+  choisit uniquement lors d'un nouvel appairage, via l'écran Pairing puis X.
+  Pour changer le type d'un hôte existant, l'oublier sur la Brick et sur
+  l'hôte, choisir l'autre type dans l'écran d'appairage, puis réappairer.
 - Le nom Bluetooth, le descripteur HID, le DeviceID et l'alias de l'adaptateur
   suivent le profil : « Brick Controller » ou « Xbox Wireless Controller ».
 - En mode Xbox, les rapports de sortie 0x03 reçus sur le canal interrupt ou par
   SET_REPORT pilotent le moteur via `rumble.rs` (GPIO 227). Le mode PC n'a pas
   de rapport de sortie : aucune vibration.
 - Start et Select sont envoyés à l'hôte comme boutons de manette.
-- L'écran **Devices** est l'écran d'accueil sans hôte. Il liste les hôtes appairés et
-  **Pair a new device**. Chaque hôte ouvre un écran de détail :
-  connexion/déconnexion, type de contrôleur PC/Xbox et **Forget pairing**.
+- L'écran **Devices** est l'écran d'accueil. Il liste toujours les hôtes appairés
+  puis **Pair a new device**, même lorsqu'un hôte est connecté. Son footer
+  propose **B Quit**, **X Forget** et **A Connect**. Oublier un hôte demande
+  toujours confirmation. Il n'y a plus d'écran de détail ni de changement de
+  type PC/Xbox pour un hôte déjà appairé.
+- Aucune connexion n'est automatique : au lancement, aucune adresse enregistrée
+  n'est contactée. Ouvrir Devices coupe la connexion en cours, la tentative de
+  connexion et l'appairage en cours (cible du reconnecteur effacée, discoverable
+  coupé, canal semi-ouvert libéré). **Connect** reste une action explicite.
 - F1 ouvre l'écran Devices depuis la vue controller. F1+F2 maintenu 1,5 s l'ouvre
   aussi : aucun rapport HID n'est envoyé pendant le maintien. Un overlay
   « Keep holding to open devices… » montre la progression.
-- Dans l'écran Devices et ses sous-écrans, la navigation est celle de NextUI : D-pad,
-  A pour valider, B pour revenir dans un sous-écran. Dans l'écran Devices, B quitte
-  immédiatement l'application. F1 est un alias de retour et F2 de validation.
-  Les rapports HID sont neutralisés.
+- Dans l'écran Devices, la navigation est celle de NextUI : D-pad, **A** pour
+  connecter l'hôte sélectionné (ou ouvrir **Pair a new device**) et **X** pour
+  l'oublier. Dans un sous-écran, B revient et A valide. Dans l'écran Devices, B
+  quitte immédiatement l'application. F1 est un alias de retour et F2 de
+  validation. Les rapports HID sont neutralisés.
+- Seul l'écran Pairing rend l'adaptateur discoverable et accepte les canaux
+  entrants ; Devices et ses sous-écrans les refusent.
 - Au retour à la vue controller, les rapports restent neutres jusqu'au
   relâchement de toutes les touches utilisées dans l'interface.
-- Le choix du type de contrôleur se fait par un écran de sélection PC/Xbox. Changer le
-  type de contrôleur de l'hôte courant supprime son appairage BlueZ et redémarre la
-  session avec la nouvelle identité ; l'écran Devices est réaffiché.
-- Sans hôte appairé, **Pair a new device** ouvre l'écran d'appairage ; X permet
-  de changer l'identité du prochain appairage.
+- Le choix du type de contrôleur se fait uniquement lors de l'appairage : dans
+  l'écran Pairing, X ouvre la liste PC/Xbox pour le prochain appairage.
+  Choisir un autre type redémarre la session Bluetooth avec la nouvelle
+  identité et réaffiche Devices. Aucun changement de type n'est proposé pour un
+  hôte déjà appairé.
+- **Pair a new device** reste disponible même avec un hôte connecté ; il ouvre
+  l'écran d'appairage, où X permet de changer l'identité du prochain appairage.
 - À la connexion d'un hôte, la vue controller affiche l'hôte, le profil et les
   derniers évènements de touches. Un compte à rebours de 10 s est affiché.
   Après 10 s, le rétroéclairage passe à 0 ; les rapports HID continuent. Un
   maintien de F1 ou F2 rallume l'écran sans déclencher l'action de la touche.
-- Ouvrir l'écran Devices annule l'extinction programmée.
+- Ouvrir l'écran Devices annule l'extinction programmée et coupe la session en
+  cours.
 - Le bouton Menu envoie Home/Guide à l'hôte depuis la vue controller ; dans les écrans
   d'interface, il est neutralisé.
 - Sur Brick standard, les sticks sont absents : le descripteur les déclare
   centrés pour rester compatible.
 
 Hôtes : macOS, Windows, Linux/SteamOS, Android, iPadOS. Un hôte mémorise
-l'identité de la manette au premier appairage ; après un changement de profil,
-il faut supprimer l'ancien appairage sur l'hôte et réappairer. Le profil choisi
-reste dans `profiles`, mais l'appairage BlueZ de l'hôte courant est supprimé
-pour forcer un réappairage propre.
+l'identité de la manette au premier appairage et le Brick la réutilise pour le
+reconnecter. Pour changer cette identité, il faut oublier l'hôte des deux
+côtés, choisir l'autre type lors d'un nouvel appairage, puis réappairer.
 
 ## Validation
 
@@ -316,16 +328,18 @@ reconstruire avant le test.
 - maintien F1+F2 : overlay « Keep holding to open devices… », HID neutralisé ;
 - navigation Devices/sous-écrans avec D-pad/A/B ; F1 retour, F2 validation ;
 - B dans l'écran Devices quitte immédiatement, sans confirmation ;
-- Écran Devices par défaut sans hôte, vue controller seulement connecté ;
-- changement de type de contrôleur : confirmation, retour à l'écran Devices et réappairage ;
+- Écran Devices par défaut sans hôte, sans connexion automatique ;
+- Pair a new device reste listé et sélectionnable avec un hôte connecté ;
+- retour sur Devices : connexion en cours et appairage arrêtés ;
+- A Connect direct sur l'hôte sélectionné, avec le profil mémorisé ;
+- X Forget dans Devices : confirmation, oubli de l'hôte, retour à la liste ;
+- choix PC/Xbox uniquement dans l'écran Pairing, puis réappairage complet ;
 - aucune fuite de D-pad/A/B/Menu/Start/Select vers l'hôte dans l'interface ;
 - compte à rebours de 10 s, extinction, rallumage par maintien F1 ou F2 ;
 - vue controller : derniers évènements de touches et profil ;
-- bascule PC/Xbox d'un hôte, redémarrage de session et réappairage ;
+- choix PC/Xbox lors d'un nouvel appairage, redémarrage de session et réappairage ;
 - vibrations en mode Xbox : rapport 0x03 sur le canal interrupt et SET_REPORT,
   moteur arrêté à la déconnexion et à la sortie ;
-- connexion d'un hôte avec le profil mémorisé ;
-- reconnexion au dernier hôte ;
 - sortie propre et restauration NextUI ;
 - crash de l'application et récupération ;
 - Bluetooth désactivé au lancement ;
@@ -351,6 +365,7 @@ Logs utiles : `$LOGS_PATH/BrickController.txt`, `dmesg`, `btmon`,
 | Tester uniquement sur l'hôte | Bugs de framebuffer/entrées non vus | Tester sur la Brick |
 | Oublier `sync` après écriture FAT | État corrompu après coupure | `sync` dans le cleanup |
 | Éteindre `/dev/disp` sans mémoriser la luminosité | Écran noir après un crash | Fichier `screen-off`, `restore`, `syncsettings.elf` |
+| Laisser deux instances du Pak | `Address in use`, écran Bluetooth trompeur, entrées partagées | Verrou PID dans `launch.sh`, arrêt de l'instance précédente |
 
 ## Sécurité et récupération
 
