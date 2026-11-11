@@ -95,11 +95,10 @@ Le port supérieur est un port hôte.
 
 ## Architecture
 
-Les profils, l'état d'entrée, le transport Bluetooth, la plateforme et la
-session sont désormais séparés en modules. `ui.rs` reste le module des écrans,
-widgets et thèmes ; son découpage est la dernière étape de la migration.
-L'architecture ci-dessous est la **cible normative** pour toute nouvelle
-évolution. Chaque étape doit compiler et passer les tests.
+Les profils, l'état d'entrée, le transport Bluetooth, la plateforme, la
+session et l'interface sont désormais séparés en modules. L'architecture
+ci-dessous est la **cible normative** pour toute nouvelle évolution. Chaque
+étape doit compiler et passer les tests.
 
 ### Principes
 
@@ -161,9 +160,13 @@ apps/brick-controller/
 │   │   ├── input_trimui.rs         # evdev TrimUI
 │   │   ├── input_h700.rs           # phase 4, prévu
 │   │   └── bluetooth_init.rs       # tg5040 / tg5050, prévu
-│   ├── ui.rs                       # thème, widgets, écrans (découpage prévu)
+│   ├── ui.rs                       # réexports, layout et primitives de dessin
 │   ├── ui/
-│   │   └── renderer.rs             # thread de rendu, animation
+│   │   ├── theme.rs                # Theme, couleurs et nextval.elf
+│   │   ├── widgets.rs              # lignes, footers, modales, barre de chargement
+│   │   ├── screens.rs              # rendu des View
+│   │   ├── renderer.rs             # thread de rendu, animation
+│   │   └── preview.rs              # aperçus, uniquement en test
 │   └── test_support.rs             # analyse de descripteur partagée par les tests
 ├── deploy/
 │   ├── launch.sh
@@ -195,7 +198,7 @@ protocole et ses notices doivent être conservés, pas réécrits.
 | `input.rs` | `PadState`, `Button`, `Hat`, état neutre | lire evdev |
 | `bluetooth/*` | BlueZ, L2CAP, SDP, `Address` | connaître les profils |
 | `platform/*` | écran, moteur, batterie, thème, evdev | connaître les profils |
-| `ui.rs`, `ui/renderer.rs` | thème, widgets, écrans, rendu | connaître `Profile` ou `Settings` |
+| `ui/*` | thème, widgets, écrans, rendu, aperçus | connaître `Profile` ou `Settings` |
 | `test_support.rs` | analyse de descripteur, helpers de test | être compilé hors des tests |
 
 ### Contrat d'un profil
@@ -318,8 +321,8 @@ Le refactor se fait dans cet ordre, chaque étape étant compilable et testée :
 4. **fait** — découpage de `main.rs` en `app/session.rs`, `app/settings.rs` et
    `app/view_model.rs` ;
 5. **fait** — ajout du profil Switch dans `profiles/switch_pro.rs` ;
-6. **restant** — découpage de `ui.rs` en `ui/theme.rs`, `ui/widgets.rs`,
-   `ui/screens.rs` et `ui/preview.rs`.
+6. **fait** — découpage de `ui.rs` en `ui/theme.rs`, `ui/widgets.rs`,
+   `ui/screens.rs`, `ui/renderer.rs` et `ui/preview.rs`.
 
 Ne pas ajouter de nouveau `match profile` dans `main.rs` : la façade
 `Controller` est le seul point d'entrée. Les nouveaux profils suivent la
