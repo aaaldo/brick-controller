@@ -69,6 +69,15 @@ VERSION=0.1.0 ./apps/brick-controller/deploy/package.sh
 Le binaire est **statique `aarch64-musl`** : aucun runtime Rust ni dépendance
 dynamique n'est nécessaire sur la Brick.
 
+### Diagnostic rust-analyzer
+
+Si l'éditeur affiche des erreurs en cascade sur `#[derive(...)]`, `format!` ou
+`include_bytes!`, rust-analyzer n'a probablement pas trouvé `rustc` : son
+processus n'hérite pas toujours du `PATH` du shell. Vérifier que
+`$HOME/.cargo/bin` est dans le `PATH` du serveur LSP, ou renseigner
+`cargo.extraEnv.PATH` et `server.extraEnv.PATH` dans les réglages de l'éditeur.
+La référence reste `cargo check --workspace --all-targets`.
+
 ### Déploiement et diagnostic
 
 ```bash
