@@ -8,9 +8,8 @@ use super::widgets::{
     draw_hold, draw_key, draw_modal, draw_status, footer, item, key_width, loading_bar, rows_at,
     status_bar_width, Loading, Modal, Row,
 };
-use super::{
-    circle, round_rect, s, ERROR, HINT_SIZE, ITEM_SIZE, SCREEN_OFF_HINT, SMALL_SIZE, TITLE_SIZE,
-};
+use super::{circle, round_rect, s, ERROR, HINT_SIZE, ITEM_SIZE, SMALL_SIZE, TITLE_SIZE};
+use crate::i18n::{fill, tr, Key, Lang};
 use crate::platform::StatusInfo;
 use brick::canvas::Canvas;
 use brick::text::Fonts;
@@ -53,6 +52,7 @@ pub fn draw(
     canvas: &mut Canvas,
     fonts: &mut Fonts,
     theme: &Theme,
+    lang: Lang,
     view: &View,
     status: &StatusInfo,
     modal: Option<&Modal>,
@@ -61,27 +61,29 @@ pub fn draw(
 ) {
     canvas.clear(theme.background);
     match view {
-        View::Splash { message } => draw_splash(canvas, fonts, theme, message, phase),
+        View::Splash { message } => draw_splash(canvas, fonts, theme, lang, message, phase),
         View::Controller { host, profile } => {
-            header(canvas, fonts, theme, status, "Connected");
-            draw_controller(canvas, fonts, theme, host, profile);
-            disconnect_hint(canvas, fonts, theme);
+            header(canvas, fonts, theme, status, tr(lang, Key::Connected));
+            draw_controller(canvas, fonts, theme, lang, host, profile);
+            disconnect_hint(canvas, fonts, theme, lang);
         }
         View::Menu { rows } => {
-            header(canvas, fonts, theme, status, "Devices");
+            header(canvas, fonts, theme, status, tr(lang, Key::Devices));
             rows_at(canvas, fonts, theme, rows, 120);
             footer(
                 canvas,
                 fonts,
                 theme,
-                &[item("B", "Quit")],
-                &[item("X", "Forget"), item("A", "Connect")],
+                &[item("B", tr(lang, Key::Quit))],
+                &[
+                    item("X", tr(lang, Key::Forget)),
+                    item("A", tr(lang, Key::Connect)),
+                ],
             );
             if rows.is_empty() {
-                let text = "No paired device.";
                 fonts.draw(
                     canvas,
-                    text,
+                    tr(lang, Key::NoPairedDevice),
                     s(canvas, 30),
                     s(canvas, 180),
                     SMALL_SIZE,
@@ -90,14 +92,14 @@ pub fn draw(
             }
         }
         View::Profile { rows } => {
-            header(canvas, fonts, theme, status, "Controller type");
+            header(canvas, fonts, theme, status, tr(lang, Key::ControllerType));
             rows_at(canvas, fonts, theme, rows, 120);
             footer(
                 canvas,
                 fonts,
                 theme,
-                &[item("B", "Cancel")],
-                &[item("A", "Choose")],
+                &[item("B", tr(lang, Key::Cancel))],
+                &[item("A", tr(lang, Key::Choose))],
             );
         }
         View::Pairing {
@@ -105,11 +107,12 @@ pub fn draw(
             controller_type,
             reconnecting,
         } => {
-            header(canvas, fonts, theme, status, "Pairing");
+            header(canvas, fonts, theme, status, tr(lang, Key::Pairing));
             draw_pairing(
                 canvas,
                 fonts,
                 theme,
+                lang,
                 identity,
                 controller_type,
                 reconnecting.as_deref(),
@@ -119,8 +122,8 @@ pub fn draw(
                 canvas,
                 fonts,
                 theme,
-                &[item("B", "Back")],
-                &[item("X", "Change controller type")],
+                &[item("B", tr(lang, Key::Back))],
+                &[item("X", tr(lang, Key::ChangeControllerType))],
             );
         }
         View::Error {
@@ -130,22 +133,30 @@ pub fn draw(
             countdown,
         } => {
             header(canvas, fonts, theme, status, title);
-            draw_error(canvas, fonts, theme, message, steps, countdown.as_deref());
+            draw_error(
+                canvas,
+                fonts,
+                theme,
+                lang,
+                message,
+                steps,
+                countdown.as_deref(),
+            );
             footer(
                 canvas,
                 fonts,
                 theme,
-                &[item("B", "Quit")],
-                &[item("A", "Retry")],
+                &[item("B", tr(lang, Key::Quit))],
+                &[item("A", tr(lang, Key::Retry))],
             );
         }
     }
 
     if let Some(modal) = modal {
-        draw_modal(canvas, fonts, theme, modal, phase);
+        draw_modal(canvas, fonts, theme, lang, modal, phase);
     }
     if let Some(progress) = hold {
-        draw_hold(canvas, fonts, theme, progress);
+        draw_hold(canvas, fonts, theme, lang, progress);
     }
 }
 
@@ -165,11 +176,18 @@ fn header(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, status: &Status
     draw_status(canvas, fonts, theme, status);
 }
 
-fn draw_splash(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, message: &str, phase: f32) {
+fn draw_splash(
+    canvas: &mut Canvas,
+    fonts: &mut Fonts,
+    theme: &Theme,
+    lang: Lang,
+    message: &str,
+    phase: f32,
+) {
     let centre = canvas.width() / 2;
     fonts.draw_centred(
         canvas,
-        "Brick Controller",
+        tr(lang, Key::AppName),
         centre,
         canvas.height() / 2 - s(canvas, 34),
         TITLE_SIZE,
@@ -206,6 +224,7 @@ fn draw_controller(
     canvas: &mut Canvas,
     fonts: &mut Fonts,
     theme: &Theme,
+    lang: Lang,
     host: &str,
     profile: &str,
 ) {
@@ -216,7 +235,7 @@ fn draw_controller(
     fonts.draw(canvas, &host, left, top, ITEM_SIZE, theme.text);
     fonts.draw(
         canvas,
-        &format!("Profile {profile} · Bluetooth HID"),
+        &fill(tr(lang, Key::ProfileLine), &[("profile", profile)]),
         left,
         top + s(canvas, 72),
         HINT_SIZE,
@@ -224,7 +243,7 @@ fn draw_controller(
     );
 
     let mut y = top + s(canvas, 180);
-    for line in fonts.wrap(SCREEN_OFF_HINT, HINT_SIZE, max_w, 3) {
+    for line in fonts.wrap(tr(lang, Key::ScreenOffHint), HINT_SIZE, max_w, 3) {
         fonts.draw(canvas, &line, left, y, HINT_SIZE, hint_text(theme));
         y += s(canvas, 48);
     }
@@ -235,10 +254,12 @@ fn draw_controller(
 /// `identity` is the Bluetooth name the adapter advertises, while
 /// `controller_type` is the user-facing profile label. They differ by design:
 /// a host lists the emulated controller name, not the app's profile name.
+#[allow(clippy::too_many_arguments)]
 fn draw_pairing(
     canvas: &mut Canvas,
     fonts: &mut Fonts,
     theme: &Theme,
+    lang: Lang,
     identity: &str,
     controller_type: &str,
     reconnecting: Option<&str>,
@@ -268,7 +289,7 @@ fn draw_pairing(
 
     fonts.draw_centred(
         canvas,
-        "VISIBLE AS",
+        tr(lang, Key::VisibleAs),
         centre,
         start,
         SMALL_SIZE,
@@ -284,7 +305,7 @@ fn draw_pairing(
     );
     fonts.draw_centred(
         canvas,
-        &format!("{controller_type} controller"),
+        &fill(tr(lang, Key::ControllerLine), &[("type", controller_type)]),
         centre,
         start + type_baseline,
         HINT_SIZE,
@@ -295,7 +316,7 @@ fn draw_pairing(
     if let Some(host) = reconnecting {
         fonts.draw_centred(
             canvas,
-            &format!("Reconnecting to {host}…"),
+            &fill(tr(lang, Key::ReconnectingTo), &[("host", host)]),
             centre,
             lower_y,
             SMALL_SIZE,
@@ -305,7 +326,7 @@ fn draw_pairing(
     let wait_y = lower_y + reconnect_h;
     fonts.draw_centred(
         canvas,
-        "Waiting for a host…",
+        tr(lang, Key::WaitingForHost),
         centre,
         wait_y,
         HINT_SIZE,
@@ -332,6 +353,7 @@ fn draw_error(
     canvas: &mut Canvas,
     fonts: &mut Fonts,
     theme: &Theme,
+    lang: Lang,
     message: &str,
     steps: &[String],
     countdown: Option<&str>,
@@ -351,7 +373,7 @@ fn draw_error(
     );
     fonts.draw(
         canvas,
-        "Bluetooth unavailable",
+        tr(lang, Key::BluetoothUnavailable),
         left + s(canvas, 140),
         icon_y - s(canvas, 8),
         ITEM_SIZE,
@@ -389,13 +411,13 @@ fn draw_error(
     }
 }
 
-fn disconnect_hint(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme) {
+fn disconnect_hint(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, lang: Lang) {
     let margin = s(canvas, 30);
     let gap = s(canvas, 15);
     let pad = s(canvas, 15);
     let h = s(canvas, 90);
     let y = canvas.height() - margin - h;
-    let label = "Disconnect (Hold)";
+    let label = tr(lang, Key::DisconnectHold);
     let plus = "+";
     let menu_w = key_width(canvas, fonts, "Menu");
     let start_w = key_width(canvas, fonts, "Start");

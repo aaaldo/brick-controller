@@ -25,6 +25,13 @@ const CONFIG: &str = "/tmp/brick-controller-bluetooth.conf";
 /// system's was running and has to be started again.
 pub const MARKER: &str = "/tmp/brick-controller-bluetoothd";
 
+/// The daemon cannot start because the adapter is absent.
+///
+/// This is also the identifier the session matches to show the translated
+/// message; the user-facing English text lives in `i18n`.
+pub const BLUETOOTH_OFF: &str =
+    "Bluetooth is off. Turn it on in NextUI settings and open Brick Controller again.";
+
 const AGENT_PATH: &str = "/brick_controller/agent";
 const PROFILE_PATH: &str = "/brick_controller/profile";
 
@@ -115,10 +122,7 @@ impl Daemon {
     /// keep BlueZ's own.
     pub fn take_over(name: &str, device_id: Option<String>) -> Result<Self, String> {
         if !std::path::Path::new("/sys/class/bluetooth/hci0").exists() {
-            return Err(
-                "Bluetooth is off. Turn it on in NextUI settings and open Brick Controller again."
-                    .into(),
-            );
+            return Err(BLUETOOTH_OFF.into());
         }
         // The marker is written before anything is stopped: a crash between
         // these lines must still tell `launch.sh` whether the system daemon was

@@ -4,6 +4,7 @@
 //! Deterministic screen previews for visual review. Only compiled for tests.
 
 use super::{draw, Modal, Row, Theme, View};
+use crate::i18n::{fill, tr, Key, Lang};
 use crate::platform::StatusInfo;
 use crate::profiles::Profile;
 use brick::canvas::Canvas;
@@ -22,19 +23,17 @@ fn preview_status(bluetooth: bool) -> StatusInfo {
 }
 
 fn preview_menu_rows(linked: bool) -> Vec<Row> {
+    let status = if linked {
+        tr(Lang::En, Key::Connected)
+    } else {
+        tr(Lang::En, Key::Offline)
+    };
+    let offline = tr(Lang::En, Key::Offline);
     let mut rows = vec![
-        Row::new(
-            "MacBook Pro",
-            if linked {
-                "PC · Connected"
-            } else {
-                "PC · Offline"
-            },
-            true,
-        ),
-        Row::new("iPhone", "Xbox · Offline", false),
+        Row::new("MacBook Pro", format!("PC · {status}"), true),
+        Row::new("iPhone", format!("Xbox · {offline}"), false),
     ];
-    rows.push(Row::new("Pair a new device", "PC", false));
+    rows.push(Row::new(tr(Lang::En, Key::PairNew), "PC", false));
     rows
 }
 
@@ -52,7 +51,7 @@ fn preview_every_screen() {
         (
             "splash",
             View::Splash {
-                message: "Starting Bluetooth…".into(),
+                message: tr(Lang::En, Key::StartingBluetooth).into(),
             },
             preview_status(false),
         ),
@@ -92,7 +91,7 @@ fn preview_every_screen() {
         (
             "pairing",
             View::Pairing {
-                identity: "Brick Controller".into(),
+                identity: tr(Lang::En, Key::AppName).into(),
                 controller_type: "PC",
                 reconnecting: None,
             },
@@ -101,13 +100,13 @@ fn preview_every_screen() {
         (
             "error",
             View::Error {
-                title: "Bluetooth off".into(),
-                message: "Brick Controller could not start Bluetooth.".into(),
+                title: tr(Lang::En, Key::BluetoothOffTitle).into(),
+                message: tr(Lang::En, Key::BluetoothOffMessage).into(),
                 steps: vec![
-                    "Open NextUI Settings and turn Bluetooth on.".into(),
-                    "Close Brick Controller and open it again.".into(),
+                    tr(Lang::En, Key::TurnBluetoothOn).into(),
+                    tr(Lang::En, Key::ReopenApp).into(),
                 ],
-                countdown: Some("Closing in 60 s.".into()),
+                countdown: Some(fill(tr(Lang::En, Key::ClosingIn), &[("n", "60")])),
             },
             preview_status(false),
         ),
@@ -118,6 +117,7 @@ fn preview_every_screen() {
             &mut canvas,
             &mut fonts,
             &theme,
+            Lang::En,
             &view,
             &status,
             None,
@@ -134,9 +134,9 @@ fn preview_every_screen() {
     }
 
     let modal = Modal {
-        title: "Forget MacBook Pro?".into(),
-        message: "You will need to pair it again from the host.".into(),
-        confirm: "Forget",
+        title: fill(tr(Lang::En, Key::ForgetTitle), &[("name", "MacBook Pro")]),
+        message: tr(Lang::En, Key::ForgetMessage).into(),
+        confirm: tr(Lang::En, Key::Forget),
         destructive: true,
         loading: false,
     };
@@ -145,6 +145,7 @@ fn preview_every_screen() {
         &mut canvas,
         &mut fonts,
         &theme,
+        Lang::En,
         &View::Menu {
             rows: preview_menu_rows(true),
         },
@@ -162,7 +163,7 @@ fn preview_every_screen() {
     .unwrap();
 
     let connecting = Modal {
-        title: "Connecting to MacBook Pro".into(),
+        title: fill(tr(Lang::En, Key::ConnectingTo), &[("name", "MacBook Pro")]),
         message: String::new(),
         confirm: "",
         destructive: false,
@@ -173,6 +174,7 @@ fn preview_every_screen() {
         &mut canvas,
         &mut fonts,
         &theme,
+        Lang::En,
         &View::Menu {
             rows: preview_menu_rows(true),
         },
@@ -198,6 +200,7 @@ fn preview_every_screen() {
         &mut canvas,
         &mut fonts,
         &theme,
+        Lang::En,
         &controller,
         &preview_status(true),
         None,

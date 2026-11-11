@@ -11,6 +11,7 @@
 mod app;
 mod bluetooth;
 mod hid;
+mod i18n;
 mod input;
 mod paths;
 mod platform;

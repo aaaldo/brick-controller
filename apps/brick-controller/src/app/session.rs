@@ -19,6 +19,7 @@ use crate::bluetooth::{
     sdp, Address,
 };
 use crate::hid;
+use crate::i18n::{fill, tr, Key, Lang};
 use crate::input::{Button, PadState};
 use crate::platform::input_trimui::Pad;
 use crate::platform::{display, rumble, StatusInfo};
@@ -46,7 +47,7 @@ const RECONNECT_BRISKLY_FOR: Duration = Duration::from_secs(60);
 const RECONNECT_SLOWLY: Duration = Duration::from_secs(30);
 
 /// The parts of a frame that decide whether a redraw is needed.
-type DrawKey = (View, StatusInfo, Option<Modal>, Option<u8>);
+type DrawKey = (Lang, View, StatusInfo, Option<Modal>, Option<u8>);
 
 /// An established HID link: the two L2CAP channels and the host they belong to.
 ///
@@ -224,10 +225,12 @@ pub(crate) fn session(
     screen: &Renderer,
     pad: &mut Pad,
 ) -> Result<SessionOutcome, String> {
+    let lang = Lang::En;
     if start == StartScreen::Splash {
         screen.show(Frame {
+            lang,
             view: View::Splash {
-                message: "Starting Bluetooth…".into(),
+                message: tr(lang, Key::StartingBluetooth).into(),
             },
             status: StatusInfo::read(false),
             modal: None,
@@ -238,6 +241,7 @@ pub(crate) fn session(
         // the daemon restarts. Show the new identity's Pairing screen at once,
         // then let the loop replace it with the live status frame.
         screen.show(Frame {
+            lang,
             view: View::Pairing {
                 identity: profile.bt_name().into(),
                 controller_type: profile.label(),
@@ -251,11 +255,11 @@ pub(crate) fn session(
 
     let daemon = match bluez::Daemon::take_over(profile.bt_name(), profile.device_id()) {
         Ok(d) => d,
-        Err(e) => return fail(screen, pad, e),
+        Err(e) => return fail(screen, pad, e, lang),
     };
     let bus = match bluez::Bus::open(&sdp::record(profile.bt_name(), profile.descriptor())) {
         Ok(b) => b,
-        Err(e) => return fail(screen, pad, e),
+        Err(e) => return fail(screen, pad, e, lang),
     };
     let _ = bus.set_alias(profile.bt_name());
     let listeners =
@@ -962,8 +966,10 @@ pub(crate) fn session(
         // the seam that keeps `ui` independent of the session.
         let status = StatusInfo::read(true);
         let target_addr = *target.lock().unwrap();
-        let view = view_for(&state, &settings, link.as_ref(), profile, target_addr);
-        let modal_view = modal.as_ref().map(|pending| modal_view(pending, &settings));
+        let view = view_for(&state, &settings, link.as_ref(), profile, target_addr, lang);
+        let modal_view = modal
+            .as_ref()
+            .map(|pending| modal_view(pending, &settings, lang));
         let hold = if combo_seen && matches!(state, Screen::Controller) && !screen_off {
             disconnect_since.map(|since| {
                 ((since.elapsed().as_secs_f32() / DISCONNECT_HOLD.as_secs_f32()).clamp(0.0, 1.0)
@@ -972,9 +978,10 @@ pub(crate) fn session(
         } else {
             None
         };
-        let key = (view.clone(), status.clone(), modal_view.clone(), hold);
+        let key = (lang, view.clone(), status.clone(), modal_view.clone(), hold);
         if !screen_off && drawn.as_ref() != Some(&key) {
             screen.show(Frame {
+                lang,
                 view,
                 status,
                 modal: modal_view,
@@ -994,21 +1001,19 @@ pub(crate) fn session(
 }
 
 /// Show an error and wait for Retry or Quit.
-fn fail(screen: &Renderer, pad: &mut Pad, error: String) -> Result<SessionOutcome, String> {
+fn fail(
+    screen: &Renderer,
+    pad: &mut Pad,
+    error: String,
+    lang: Lang,
+) -> Result<SessionOutcome, String> {
     eprintln!("brick-controller: {error}");
     let deadline = Instant::now() + Duration::from_secs(60);
     let mut previous = pad.mapper.state;
     let mut shown = 60u64;
     screen.show(Frame {
-        view: View::Error {
-            title: "Bluetooth off".into(),
-            message: error.clone(),
-            steps: vec![
-                "Open NextUI Settings and turn Bluetooth on.".into(),
-                "Close Brick Controller and open it again.".into(),
-            ],
-            countdown: Some("Closing in 60 s.".into()),
-        },
+        lang,
+        view: error_view(lang, &error, fill(tr(lang, Key::ClosingIn), &[("n", "60")])),
         status: StatusInfo::read(false),
         modal: None,
         hold: None,
@@ -1035,16 +1040,14 @@ fn fail(screen: &Renderer, pad: &mut Pad, error: String) -> Result<SessionOutcom
         let left = deadline.saturating_duration_since(Instant::now()).as_secs();
         if left != shown {
             shown = left;
+            let countdown = left.to_string();
             screen.show(Frame {
-                view: View::Error {
-                    title: "Bluetooth off".into(),
-                    message: error.clone(),
-                    steps: vec![
-                        "Open NextUI Settings and turn Bluetooth on.".into(),
-                        "Close Brick Controller and open it again.".into(),
-                    ],
-                    countdown: Some(format!("Closing in {left} s.")),
-                },
+                lang,
+                view: error_view(
+                    lang,
+                    &error,
+                    fill(tr(lang, Key::ClosingIn), &[("n", &countdown)]),
+                ),
                 status: StatusInfo::read(false),
                 modal: None,
                 hold: None,
@@ -1052,4 +1055,26 @@ fn fail(screen: &Renderer, pad: &mut Pad, error: String) -> Result<SessionOutcom
         }
     }
     Ok(SessionOutcome::Quit)
+}
+
+/// The error screen for a failed Bluetooth takeover.
+///
+/// The daemon's own message is shown only for the known Bluetooth-off case;
+/// anything else is a technical detail kept verbatim so a bug report can be
+/// matched to the log.
+fn error_view(lang: Lang, error: &str, countdown: String) -> View {
+    let message = if error == bluez::BLUETOOTH_OFF {
+        tr(lang, Key::BluetoothOffMessage).into()
+    } else {
+        error.to_string()
+    };
+    View::Error {
+        title: tr(lang, Key::BluetoothOffTitle).into(),
+        message,
+        steps: vec![
+            tr(lang, Key::TurnBluetoothOn).into(),
+            tr(lang, Key::ReopenApp).into(),
+        ],
+        countdown: Some(countdown),
+    }
 }

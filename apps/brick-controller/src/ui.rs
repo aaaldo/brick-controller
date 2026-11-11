@@ -35,8 +35,6 @@ const ITEM_SIZE: f32 = 48.0;
 const KEY_SIZE: f32 = 27.0;
 const TITLE_SIZE: f32 = 72.0;
 const ROW_H: i32 = 90;
-const SCREEN_OFF_HINT: &str =
-    "Screen will switch off after 10s. Press Menu+Start once to wake it up";
 
 /// Scale a layout value from the 1024-wide reference to the actual panel.
 ///
