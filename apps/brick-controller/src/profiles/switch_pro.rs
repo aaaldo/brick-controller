@@ -19,7 +19,7 @@
 //! motion". The single Brick motor receives the strongest rumble band.
 
 use super::codec::{Codec as CodecTrait, LinkContext, Output, Reports};
-use super::spec::{ProfileSpec, Schedule};
+use super::spec::{ProfileSpec, Schedule, UsbId};
 use crate::bluetooth::Address;
 use crate::hid::{self, Control};
 use crate::input::{Button, Hat, PadState};
@@ -27,6 +27,13 @@ use std::collections::VecDeque;
 use std::time::Duration;
 
 pub const NAME: &str = "Pro Controller";
+/// The Pro Controller's USB identity, published in the SDP Device ID record.
+///
+/// macOS, iPadOS and Windows match their native Pro Controller driver on these
+/// two values. Without them BlueZ advertises its own `1D6B:0246`, the host
+/// falls back to a generic HID device and the pad never reaches GameController.
+pub const VENDOR: u16 = 0x057E;
+pub const PRODUCT: u16 = 0x2009;
 
 pub const DESCRIPTOR: &[u8] = &[
     0x05, 0x01, 0x09, 0x05, 0xA1, 0x01, 0x06, 0x01, 0xFF, 0x85, 0x21, 0x09, 0x21, 0x75, 0x08, 0x95,
@@ -45,7 +52,13 @@ pub const SPEC: ProfileSpec = ProfileSpec {
     key: "switch",
     label: "Switch",
     bluetooth_name: NAME,
-    usb: None,
+    usb: Some(UsbId {
+        vendor: VENDOR,
+        product: PRODUCT,
+        // Real hardware reports no meaningful bcdDevice; hosts match on the
+        // vendor and product only.
+        version: 0x0000,
+    }),
     descriptor: DESCRIPTOR,
     schedule: Schedule::Periodic {
         every: Duration::from_millis(15),
@@ -193,7 +206,13 @@ impl CodecTrait for Codec {
         if !self.replies.is_empty() {
             self.replies.pop_front();
         }
-        Reports::one(&report)
+        // Every other profile hands the session a DATA transaction. The
+        // Switch report IDs (0x3F, 0x30, 0x21) are payload, not headers: a
+        // host drops the whole report when 0xA1 is missing.
+        let mut packet = [0u8; REPORT_LEN + 1];
+        packet[0] = hid::DATA_INPUT;
+        packet[1..=report.len()].copy_from_slice(&report);
+        Reports::one(&packet[..=report.len()])
     }
 
     fn control(&mut self, message: &[u8], _link: &LinkContext, state: &PadState) -> Control {
@@ -422,6 +441,18 @@ mod tests {
     }
 
     #[test]
+    fn the_device_id_record_names_the_pro_controller() {
+        assert_eq!(
+            SPEC.usb,
+            Some(UsbId {
+                vendor: 0x057E,
+                product: 0x2009,
+                version: 0x0000,
+            })
+        );
+    }
+
+    #[test]
     fn simple_reports_are_twelve_bytes_with_a_centred_pad() {
         let report = simple_report(&PadState::default());
         assert_eq!(report.len(), 12);
@@ -433,21 +464,17 @@ mod tests {
     #[test]
     fn the_host_switches_the_codec_to_full_reports() {
         let mut codec = Codec::default();
-        assert_eq!(
-            codec
-                .packets(&PadState::default(), Duration::ZERO)
-                .iter()
-                .next()
-                .unwrap()[0],
-            0x3F
-        );
+        let simple = codec.packets(&PadState::default(), Duration::ZERO);
+        let simple = simple.iter().next().unwrap();
+        assert_eq!(&simple[..2], &[hid::DATA_INPUT, 0x3F]);
         codec.output(&[0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x03, 0x30], &link());
         // The acknowledgement is 0x21, then the next packet is 0x30.
         let ack = codec.packets(&PadState::default(), Duration::ZERO);
-        assert_eq!(ack.iter().next().unwrap()[0], 0x21);
+        assert_eq!(&ack.iter().next().unwrap()[..2], &[hid::DATA_INPUT, 0x21]);
         let full = codec.packets(&PadState::default(), Duration::ZERO);
-        assert_eq!(full.iter().next().unwrap()[0], 0x30);
-        assert_eq!(full.iter().next().unwrap().len(), REPORT_LEN);
+        let full = full.iter().next().unwrap();
+        assert_eq!(&full[..2], &[hid::DATA_INPUT, 0x30]);
+        assert_eq!(full.len(), REPORT_LEN + 1);
     }
 
     #[test]
@@ -456,8 +483,8 @@ mod tests {
         codec.output(&[0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02], &link());
         let report = codec.packets(&PadState::default(), Duration::ZERO);
         let report = report.iter().next().unwrap();
-        assert_eq!(&report[13..15], &[0x82, 0x02]);
-        assert_eq!(&report[19..25], &[0x55, 0x44, 0x33, 0x22, 0x11, 0x02]);
+        assert_eq!(&report[14..16], &[0x82, 0x02]);
+        assert_eq!(&report[20..26], &[0x55, 0x44, 0x33, 0x22, 0x11, 0x02]);
     }
 
     #[test]
@@ -469,8 +496,8 @@ mod tests {
         );
         let report = codec.packets(&PadState::default(), Duration::ZERO);
         let report = report.iter().next().unwrap();
-        assert_eq!(&report[13..15], &[0x90, 0x10]);
-        assert_eq!(report[20], 0x03, "device type in the emulated flash");
+        assert_eq!(&report[14..16], &[0x90, 0x10]);
+        assert_eq!(report[21], 0x03, "device type in the emulated flash");
     }
 
     #[test]

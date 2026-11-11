@@ -461,8 +461,12 @@ Règles :
 
 ## Profils HID
 
-- **PC** : HID générique, compatible macOS, Windows, Linux/SteamOS, Android et
-  iPadOS. Profil par défaut.
+- **PC** : HID générique, compatible Windows, Linux/SteamOS, Android et les
+  applications Mac/iPad qui lisent le HID directement (Steam par exemple).
+  Profil par défaut. macOS n'expose pas un pad HID générique à GameController :
+  il n'apparaît ni dans Réglages Système > Manettes, ni dans les jeux qui
+  utilisent ce framework. Sur un hôte Apple, utiliser Xbox, PlayStation ou
+  Switch.
 - **Xbox** : identité Xbox Wireless Controller (`045E:02FD`) pour XInput sous
   Windows et la prise en charge Xbox native sur macOS, iPadOS et Android.
 - **PlayStation** : identité DualShock 4 (`054C:09CC`), nom Bluetooth
@@ -470,9 +474,12 @@ Règles :
   d'identité DualSense distincte : le profil PlayStation présente une manette
   DualShock 4.
 - **Switch** : identité Switch Pro Controller (`057E:2009`), nom Bluetooth
-  « Pro Controller », module `profiles/switch_pro.rs`. Le handshake Switch
-  (sous-commandes 0x01, réponses 0x21) est porté de `deck-as-controller` (MIT)
-  avec conservation de la notice. Pas d'IMU, NFC, IR ni HD rumble.
+  « Pro Controller », module `profiles/switch_pro.rs`. L'identité USB est
+  publiée dans le record SDP Device ID : sans elle, BlueZ annonce
+  `1D6B:0246` et macOS, iPadOS et Windows n'associent pas leur pilote Pro
+  Controller natif. Le handshake Switch (sous-commandes 0x01, réponses 0x21)
+  est porté de `deck-as-controller` (MIT) avec conservation de la notice. Pas
+  d'IMU, NFC, IR ni HD rumble.
 - Le profil est stocké **par hôte** dans `$BRICK_CONTROLLER_DATA/profiles`
   (`ADDR=pc`, `ADDR=xbox`, puis `ADDR=ps4` ou `ADDR=switch`). L'identité
   utilisée au premier appairage est mémorisée pour cet hôte et réutilisée pour
