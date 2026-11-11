@@ -131,6 +131,8 @@ The identity is chosen when pairing a new host:
 Open **Pair a new device**, press **X** to choose the controller type, then pair
 from the host. Choosing another type restarts the Bluetooth session with the
 new identity and returns to the **Pairing** screen, ready for the host to pair.
+A blocking **Changing controller type** popup with a loading bar covers the
+restart.
 Each host keeps the identity it first paired with, and the Brick uses it again
 when that host is connected.
 

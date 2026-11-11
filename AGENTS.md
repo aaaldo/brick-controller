@@ -542,8 +542,10 @@ Règles :
 - Le choix du type de contrôleur se fait uniquement lors de l'appairage : dans
   l'écran Pairing, X ouvre la liste des profils pour le prochain appairage.
   Choisir un autre type redémarre la session Bluetooth avec la nouvelle
-  identité et réaffiche **Pairing**, pour permettre l'appairage immédiat. Aucun
-  changement de type n'est proposé pour un hôte déjà appairé.
+  identité et réaffiche **Pairing**, pour permettre l'appairage immédiat. Une
+  popup bloquante « Changing controller type… » avec barre indéterminée couvre
+  le redémarrage. Aucun changement de type n'est proposé pour un hôte déjà
+  appairé.
 - L'écran Pairing affiche l'identité, le type de contrôleur et le libellé
   « Waiting for a host… » au même format de texte, suivi d'une barre de
   chargement horizontale indéterminée en color1. Il ne contient plus de

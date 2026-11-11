@@ -191,6 +191,39 @@ fn preview_every_screen() {
     )
     .unwrap();
 
+    let changing = Modal {
+        title: tr(Lang::En, Key::ChangingControllerType).into(),
+        message: String::new(),
+        confirm: "",
+        destructive: false,
+        loading: true,
+    };
+    let mut canvas = Canvas::in_memory(1024, 768);
+    draw(
+        &mut canvas,
+        &mut fonts,
+        &theme,
+        Lang::En,
+        &View::Profile {
+            rows: Profile::ALL
+                .iter()
+                .enumerate()
+                .map(|(i, profile)| Row::new(profile.label(), "", i == 0))
+                .collect(),
+        },
+        &preview_status(true),
+        Some(&changing),
+        None,
+        0.35,
+    );
+    png::write_png(
+        &format!("{dir}/changing-type.png"),
+        1024,
+        768,
+        &canvas.snapshot_rgb(),
+    )
+    .unwrap();
+
     let controller = View::Controller {
         host: "MacBook Pro".into(),
         profile: "PC",

@@ -39,6 +39,8 @@ pub enum Screen {
 pub enum ModalState {
     Forget(usize),
     Connecting(Address),
+    /// The Bluetooth session is restarting with another controller identity.
+    ChangingType,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,12 +155,27 @@ pub fn view_for(
     }
 }
 
+/// The blocking popup shown while the session restarts with another identity.
+///
+/// `draw_modal` uses the title and an indeterminate bar for a loading modal,
+/// so the message is the title rather than the body.
+pub fn changing_type_modal(lang: Lang) -> Modal {
+    Modal {
+        title: tr(lang, Key::ChangingControllerType).into(),
+        message: String::new(),
+        confirm: "",
+        destructive: false,
+        loading: true,
+    }
+}
+
 /// Build the blocking popup for the modal state.
 ///
 /// The host name is resolved here, once, so the UI never needs to know how to
 /// find a host by address.
 pub fn modal_view(modal: &ModalState, settings: &Settings, lang: Lang) -> Modal {
     match modal {
+        ModalState::ChangingType => changing_type_modal(lang),
         ModalState::Forget(index) => {
             let name = settings
                 .hosts
