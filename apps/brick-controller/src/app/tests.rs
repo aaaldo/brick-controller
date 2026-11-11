@@ -7,6 +7,7 @@
 
 use super::settings::Settings;
 use super::view_model::{move_cursor, nav_dir, Dir, MenuRow};
+use super::{start_after_switch, StartScreen};
 use crate::bluetooth::{bluez, Address};
 use crate::input::Hat;
 use crate::profiles::Profile;
@@ -55,4 +56,10 @@ fn a_profile_key_round_trips() {
     assert_eq!(Profile::from_key("PC"), Some(Profile::Pc));
     assert_eq!(Profile::from_key("PlayStation"), Some(Profile::PlayStation));
     assert_eq!(Profile::from_key("ds4"), None);
+}
+
+#[test]
+fn a_chosen_profile_reopens_pairing() {
+    assert_eq!(start_after_switch(true), StartScreen::Pairing);
+    assert_eq!(start_after_switch(false), StartScreen::Devices);
 }

@@ -29,7 +29,7 @@ impl Frame {
     /// Splash and connection popup use an indeterminate bar; the renderer
     /// keeps redrawing them so its segment moves.
     fn animates(&self) -> bool {
-        matches!(&self.view, View::Splash { .. })
+        matches!(&self.view, View::Splash { .. } | View::Pairing { .. })
             || self.modal.as_ref().is_some_and(|modal| modal.loading)
     }
 }
@@ -178,5 +178,46 @@ impl Drop for Renderer {
         if let Some(t) = self.thread.take() {
             let _ = t.join();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn status() -> StatusInfo {
+        StatusInfo {
+            clock: "--:--".into(),
+            battery: None,
+            charging: false,
+            wifi: false,
+            bluetooth: true,
+        }
+    }
+
+    #[test]
+    fn the_pairing_bar_keeps_the_renderer_animating() {
+        let frame = Frame {
+            view: View::Pairing {
+                identity: "Pro Controller".into(),
+                controller_type: "Switch",
+                reconnecting: None,
+            },
+            status: status(),
+            modal: None,
+            hold: None,
+        };
+        assert!(frame.animates());
+    }
+
+    #[test]
+    fn a_static_screen_does_not_animate() {
+        let frame = Frame {
+            view: View::Menu { rows: Vec::new() },
+            status: status(),
+            modal: None,
+            hold: None,
+        };
+        assert!(!frame.animates());
     }
 }
