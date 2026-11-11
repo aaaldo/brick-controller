@@ -62,7 +62,7 @@ pub fn record(name: &str, descriptor: &[u8]) -> String {
   </attribute>
   <attribute id="0x0100"><text value="{name}" /></attribute>
   <attribute id="0x0101"><text value="Gamepad" /></attribute>
-  <attribute id="0x0102"><text value="Brick Controller" /></attribute>
+  <attribute id="0x0102"><text value="{name}" /></attribute>
   <attribute id="0x0200"><uint16 value="0x0100" /></attribute>
   <attribute id="0x0201"><uint16 value="0x0111" /></attribute>
   <attribute id="0x0202"><uint8 value="0x08" /></attribute>
@@ -97,8 +97,15 @@ mod tests {
 
     #[test]
     fn the_record_carries_the_descriptor_as_hex_and_both_channels() {
-        let xml = record("Brick Controller", &[0x05, 0x01, 0xC0]);
+        let name = "Brick Controller (Switch)";
+        let xml = record(name, &[0x05, 0x01, 0xC0]);
         assert!(xml.contains(r#"<text encoding="hex" value="0501c0" />"#));
+        assert!(
+            xml.contains(&format!(
+                r#"<attribute id="0x0102"><text value="{name}" /></attribute>"#
+            )),
+            "the product name follows the Bluetooth name"
+        );
         assert!(xml.contains(r#"<uint16 value="0x0011" />"#), "control PSM");
         assert!(
             xml.contains(r#"<uint16 value="0x0013" />"#),

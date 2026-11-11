@@ -33,8 +33,7 @@ use std::time::Duration;
 
 pub const VENDOR: u16 = 0x054C;
 pub const PRODUCT: u16 = 0x09CC;
-/// What a real one calls itself.
-pub const NAME: &str = "Wireless Controller";
+pub const NAME: &str = "Brick Controller (PS4)";
 
 pub const SPEC: ProfileSpec = ProfileSpec {
     key: "ps4",

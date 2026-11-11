@@ -10,7 +10,8 @@
 
 use super::settings::{remember_profile, save_host, save_mode, save_profiles, Settings};
 use super::view_model::{
-    modal_view, move_cursor, nav_dir, view_for, Dir, MenuRow, ModalState, Screen,
+    changing_type_modal, modal_view, move_cursor, nav_dir, view_for, Dir, MenuRow, ModalState,
+    Screen,
 };
 use super::StartScreen;
 use crate::bluetooth::{
@@ -205,6 +206,20 @@ fn open_devices(
     *settings = Settings::load(bus, profile);
 }
 
+/// Post a frame immediately, outside the normal redraw path.
+///
+/// A type change leaves the session before the loop reaches its draw step, but
+/// the popup has to be visible while the Bluetooth daemon is torn down.
+fn show_frame(screen: &Renderer, lang: Lang, view: View, modal: Option<Modal>) {
+    screen.show(Frame {
+        lang,
+        view,
+        status: StatusInfo::read(true),
+        modal,
+        hold: None,
+    });
+}
+
 /// Bluetooth up as the chosen controller, until Menu+Start is held or another
 /// host profile is selected.
 ///
@@ -248,7 +263,7 @@ pub(crate) fn session(
                 reconnecting: None,
             },
             status: StatusInfo::read(false),
-            modal: None,
+            modal: Some(changing_type_modal(lang)),
             hold: None,
         });
     }
@@ -702,8 +717,9 @@ pub(crate) fn session(
                             }
                         }
                         // The connection popup owns the screen until the link
-                        // comes up or its timeout expires.
-                        ModalState::Connecting(_) => {}
+                        // comes up or its timeout expires. A type change
+                        // leaves the loop immediately.
+                        ModalState::Connecting(_) | ModalState::ChangingType => {}
                     }
                 } else {
                     match state.clone() {
@@ -814,6 +830,16 @@ pub(crate) fn session(
                                     save_mode(choice);
                                     switch_to = Some(choice);
                                     switch_pairing = true;
+                                    modal = Some(ModalState::ChangingType);
+                                    let view = view_for(
+                                        &state,
+                                        &settings,
+                                        link.as_ref(),
+                                        profile,
+                                        *target.lock().unwrap(),
+                                        lang,
+                                    );
+                                    show_frame(screen, lang, view, Some(changing_type_modal(lang)));
                                 } else {
                                     state = Screen::Pairing { back: true };
                                 }

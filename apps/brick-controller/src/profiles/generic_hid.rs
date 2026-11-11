@@ -24,7 +24,7 @@ use crate::hid::{self, Control, DATA_INPUT};
 use crate::input::PadState;
 use std::time::Duration;
 
-pub const NAME: &str = "Brick Controller";
+pub const NAME: &str = "Brick Controller (PC)";
 
 pub const DESCRIPTOR: &[u8] = &[
     0x05, 0x01, //       Usage Page (Generic Desktop)

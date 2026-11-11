@@ -6,9 +6,10 @@
 //! `ui/preview.rs`.
 
 use super::settings::Settings;
-use super::view_model::{move_cursor, nav_dir, Dir, MenuRow};
+use super::view_model::{changing_type_modal, move_cursor, nav_dir, Dir, MenuRow};
 use super::{start_after_switch, StartScreen};
 use crate::bluetooth::{bluez, Address};
+use crate::i18n::Lang;
 use crate::input::Hat;
 use crate::profiles::Profile;
 use std::collections::HashMap;
@@ -62,4 +63,11 @@ fn a_profile_key_round_trips() {
 fn a_chosen_profile_reopens_pairing() {
     assert_eq!(start_after_switch(true), StartScreen::Pairing);
     assert_eq!(start_after_switch(false), StartScreen::Devices);
+}
+
+#[test]
+fn changing_the_controller_type_shows_a_loading_popup() {
+    let modal = changing_type_modal(Lang::En);
+    assert!(modal.loading);
+    assert_eq!(modal.title, "Changing controller type…");
 }
