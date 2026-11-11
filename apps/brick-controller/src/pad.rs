@@ -23,8 +23,7 @@ const EV_KEY: u16 = 1;
 const EV_ABS: u16 = 3;
 
 const BTN_SOUTH: u16 = 304;
-const BTN_MODE: u16 = 316;
-const BTN_THUMBL: u16 = 317;
+/// The Brick's front function keys, later mapped to L3 and R3.
 const BTN_THUMBR: u16 = 318;
 /// The handheld's X (top) and Y (left) buttons.
 const KEY_X: u16 = 308;
@@ -80,10 +79,9 @@ pub use brick::input::pad_path;
 #[derive(Clone)]
 pub struct Mapper {
     pub state: State,
-    /// The Brick's front function keys are app navigation, not gamepad
-    /// buttons. NextUI reports them as BTN_THUMBL/R; neither reaches the host.
-    pub f1: bool,
-    pub f2: bool,
+    /// Set when Menu and Start were down together, even if both were released
+    /// before the next poll. Cleared by `take_combo_tap`.
+    combo_tap: bool,
     /// (min, max) for ABS_X..=ABS_RZ.
     ranges: [(i32, i32); 6],
     hat: (i32, i32),
@@ -93,8 +91,7 @@ impl Default for Mapper {
     fn default() -> Self {
         Self {
             state: State::default(),
-            f1: false,
-            f2: false,
+            combo_tap: false,
             ranges: [
                 (-32768, 32767),
                 (-32768, 32767),
@@ -116,24 +113,26 @@ impl Mapper {
         }
     }
 
+    /// Whether Menu+Start was seen down together since the last call.
+    pub fn take_combo_tap(&mut self) -> bool {
+        std::mem::take(&mut self.combo_tap)
+    }
+
     /// Apply one event. True when it completes a frame (SYN_REPORT), which is
     /// when a report should go out.
     fn apply(&mut self, kind: u16, code: u16, value: i32) -> bool {
         match kind {
             EV_SYN => return code == 0,
-            EV_KEY if code == BTN_THUMBL && value != 2 => {
-                self.f1 = value != 0;
-            }
-            EV_KEY if code == BTN_THUMBR && value != 2 => {
-                self.f2 = value != 0;
-            }
-            EV_KEY if (BTN_SOUTH..=BTN_MODE).contains(&code) && value != 2 => {
+            EV_KEY if (BTN_SOUTH..=BTN_THUMBR).contains(&code) && value != 2 => {
                 let number = match code {
                     KEY_X => button::NORTH,
                     KEY_Y => button::WEST,
                     _ => (code - BTN_SOUTH + 1) as u8,
                 };
                 self.state.set_button(number, value != 0);
+                if self.state.pressed(button::HOME) && self.state.pressed(button::START) {
+                    self.combo_tap = true;
+                }
             }
             EV_ABS => {
                 let scaled = |i: usize| {
@@ -199,9 +198,9 @@ impl Pad {
             seen: Default::default(),
         };
         // Nothing else reads the gamepad node while the app is away, so events
-        // from the launcher can still be queued here. Replaying them would
-        // make an old F1/F2 press look like a fresh hold and open the quit
-        // chord; start from what happens after launch instead.
+        // from the launcher can still be queued here. Replaying them could
+        // look like a fresh Menu+Start chord; start from what happens after
+        // launch instead.
         pad.drain()?;
         Ok(pad)
     }
@@ -272,18 +271,25 @@ mod tests {
         let mut m = Mapper::default();
         assert!(feed(
             &mut m,
-            &[
-                (EV_KEY, 304, 1),
-                (EV_KEY, 316, 1),
-                (EV_KEY, 318, 1),
-                (EV_SYN, 0, 0)
-            ]
+            &[(EV_KEY, 304, 1), (EV_KEY, 316, 1), (EV_SYN, 0, 0)]
         ));
         assert!(m.state.pressed(button::SOUTH));
         assert!(m.state.pressed(button::HOME));
-        assert!(m.f2, "BTN_THUMBR is the front function key, not R3");
         feed(&mut m, &[(EV_KEY, 304, 0)]);
         assert!(!m.state.pressed(button::SOUTH));
+    }
+
+    #[test]
+    fn menu_and_start_together_set_a_tap_even_when_released_before_the_poll() {
+        let mut m = Mapper::default();
+        feed(&mut m, &[(EV_KEY, 316, 1)]);
+        assert!(!m.take_combo_tap());
+        feed(
+            &mut m,
+            &[(EV_KEY, 315, 1), (EV_KEY, 315, 0), (EV_KEY, 316, 0)],
+        );
+        assert!(m.take_combo_tap());
+        assert!(!m.take_combo_tap(), "the tap is consumed once");
     }
 
     #[test]
@@ -319,16 +325,15 @@ mod tests {
     }
 
     #[test]
-    fn front_function_keys_are_ui_only() {
+    fn front_function_keys_map_to_l3_and_r3() {
         let mut m = Mapper::default();
-        feed(&mut m, &[(EV_KEY, BTN_THUMBL, 1), (EV_KEY, BTN_THUMBR, 1)]);
-        assert!(m.f1);
-        assert!(m.f2);
+        feed(&mut m, &[(EV_KEY, 317, 1)]);
+        assert!(m.state.pressed(button::L3));
+        feed(&mut m, &[(EV_KEY, 317, 0), (EV_KEY, 318, 1)]);
         assert!(!m.state.pressed(button::L3));
+        assert!(m.state.pressed(button::R3));
+        feed(&mut m, &[(EV_KEY, 318, 0)]);
         assert!(!m.state.pressed(button::R3));
-        feed(&mut m, &[(EV_KEY, BTN_THUMBL, 0), (EV_KEY, BTN_THUMBR, 0)]);
-        assert!(!m.f1);
-        assert!(!m.f2);
     }
 
     #[test]

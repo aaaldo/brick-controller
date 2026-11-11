@@ -13,29 +13,32 @@ installed on the host.
 ## Features
 
 - Standard Bluetooth HID gamepad: no host driver.
-- D-pad, A/B/X/Y, L1/L2/R1/R2, Start, Select and Menu.
+- D-pad, A/B/X/Y, L1/L2/R1/R2, Start, Select, Menu, and F1/F2 as L3/R3.
 - Start and Select are passed to the host as normal gamepad buttons.
 - The **Devices** screen is the app's home and is shown at launch. It always
   lists the paired hosts, even while one is connected, followed by **Pair a new
   device**. **B** quits the app from the Devices screen.
-- **F1** opens the Devices screen from the controller view. **F1+F2** held for 1.5 s
-  opens it too; gamepad input is neutralised while both keys are held.
+- Holding **Menu+Start** for 1 s disconnects and opens the Devices screen;
+  gamepad input is neutralised while the chord is held. F1 and F2 are not used
+  for navigation: they reach the host as **L3** and **R3**.
 - Opening Devices stops the active link or pairing attempt. Nothing connects
   automatically at launch or after returning to Devices: choose a host and
   press **Connect**, or open **Pair a new device**.
+- Pressing **Connect** shows a blocking **Connecting to <device>** popup with an
+  animated loading bar until the host answers. The popup closes after 15
+  seconds if the host does not respond.
 - Inside the Devices screen, D-pad moves, **A** connects the selected host (or
   opens **Pair a new device**) and **X** forgets it. In a sub-screen, B goes
-  back, A selects; on the Devices screen, B quits. F1 is a Back alias and F2 a
-  Select alias.
+  back, A selects; on the Devices screen, B quits.
 - Forgetting a host asks for confirmation. The PC/Xbox controller type is
   chosen only while pairing a new host, not for an already paired one.
-- The controller view shows the host, the profile, and the recent button and
-  axis events. The input monitor is merged into this view.
+- The controller view is titled **Connected** and shows the host and the
+  connection profile.
 - The status bar shows the time, Bluetooth, Wi-Fi and battery state, using the
   nextval colours and the NextUI font when they are available.
 - After a host connects, the panel switches off after 10 seconds while the
-  gamepad keeps working. Hold **F1** or **F2** to switch it back on; that hold
-  does not trigger the key's action.
+  gamepad keeps working. Press **Menu+Start** once to wake it; each wake starts
+  a new 10-second cycle. The chord is not sent to the host.
 - **MENU** tap sends Home/Guide while the controller view is active.
 - Rumble in Xbox mode when the host sends output reports; the PC profile has
   no rumble output report.
@@ -85,18 +88,19 @@ Use the **bottom USB-C port** for ADB. The top port is a USB host port.
 3. To pair a new host, select **Pair a new device**, then open Bluetooth
    settings on the host and pair with the name shown on the Brick (`Brick
    Controller` by default).
-4. To use an already paired host, select it and press **Connect**. After the
-   link is established, the controller view shows the host, the profile and the
-   recent input events. The panel switches off after 10 seconds. Hold **F1** or
-   **F2** to light it again.
-5. Press **F1**, or hold **F1+F2** for 1.5 s, to open the Devices screen; the
+4. To use an already paired host, select it and press **Connect**. A blocking
+   **Connecting to <device>** popup is shown while the link is established.
+   After that, the controller view shows the host and the profile. The panel
+   switches off after 10 seconds; press **Menu+Start** once to light it again.
+5. Hold **Menu+Start** for 1 s to disconnect and open the Devices screen; the
    current link or pairing attempt is stopped. Press **A** to connect the
    selected host or **X** to forget it after confirming. Press **B** in the
    Devices screen to quit.
 6. Tap **MENU** on the controller view to send Home/Guide.
 
-Start and Select are not used by the app; they reach the host as normal gamepad
-buttons. While the Devices screen or a sub-screen is open, gamepad input is kept away from the host.
+Start is used with Menu for the disconnect and wake chord; otherwise Start and
+Select reach the host as normal gamepad buttons. While the Devices screen or a
+sub-screen is open, gamepad input is kept away from the host.
 
 ## Xbox and PC controller types
 
@@ -148,8 +152,8 @@ or run:
 /mnt/SDCARD/.system/tg5040/etc/bluetooth/bt_init.sh start
 ```
 
-If the panel remains dark after a crash or a forced exit, hold **F1** or
-**F2** to wake it. `launch.sh` also restores the saved brightness and runs
+If the panel remains dark after a crash or a forced exit, press
+**Menu+Start** once to wake it. `launch.sh` also restores the saved brightness and runs
 `syncsettings.elf` on exit; running
 
 ```sh

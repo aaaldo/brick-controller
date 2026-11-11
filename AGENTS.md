@@ -16,12 +16,14 @@ Périmètre actuel :
 - **H700** : plus tard, hors périmètre immédiat.
 - **Hôtes** : macOS, Windows, Linux/SteamOS, Android, iPadOS.
 - **Profils HID** : PC (HID générique) et Xbox (identité Xbox Wireless
-  Controller), choisis **par hôte** depuis les réglages.
-- **Navigation de l'app** : écran **Devices** comme accueil sans hôte. F1 ouvre
-  l'écran Devices depuis la vue controller ; F1+F2 maintenu 1,5 s l'ouvre aussi, avec HID
-  neutralisé pendant le maintien. Dans les écrans d'interface : D-pad, A, B
-  (F1 = retour, F2 = valider). Le jeu de boutons est neutralisé vers l'hôte
-  pendant ces écrans. Start et Select restent des boutons de manette.
+  Controller), choisis **lors de l'appairage**.
+- **Navigation de l'app** : écran **Devices** comme accueil sans hôte.
+  Menu+Start maintenu 1 s déconnecte et ouvre Devices depuis la vue Connected,
+  avec HID neutralisé pendant le maintien ; un appui simple Menu+Start rallume
+  l'écran éteint. F1/F2 ne naviguent pas dans l'interface : elles sont mappées
+  sur L3/R3 et envoyées à l'hôte. Dans les écrans d'interface : D-pad, A, B. Le
+  jeu de boutons est neutralisé vers l'hôte pendant ces écrans. Start et Select
+  restent des boutons de manette.
   Dans l'écran Devices, **B** quitte immédiatement l'application, sans confirmation.
 - **USB HID** : hors périmètre du MVP. Le noyau stock de la Brick ne compile
   probablement pas `f_hid` ; le Bluetooth est la voie principale.
@@ -208,9 +210,10 @@ Sonde validée sur NextUI `NextUI-20261013-0`, noyau `4.9.191` :
 - Entrées : `TRIMUI Player1` sur `/dev/input/event3`, avec `ABS_X/Y/RX/RY`
   centrés, `ABS_Z/RZ` 0..255 et `ABS_HAT0X/Y`.
 - Pas de sticks analogiques.
-- F1/F2 : touches de navigation de l'app (F1 menu/retour, F2 validation,
-  F1+F2 maintenu 1,5 s pour l'écran Devices). Non envoyées à l'hôte. Dans les écrans
-  d'interface, le D-pad et A/B sont aussi utilisés et neutralisés côté hôte.
+- F1/F2 : touches de manette mappées sur L3/R3, jamais utilisées pour la
+  navigation de l'app. Menu+Start maintenu 1 s déconnecte et ouvre Devices ; le
+  même combo, appuyé une fois, rallume l'écran. Dans les écrans d'interface, le
+  D-pad et A/B sont utilisés et neutralisés côté hôte.
 - Rumble : GPIO 227 + `/sys/class/motor/voltage` (3,3 V sur Brick standard),
   utilisé en mode Xbox par le rapport de sortie 0x03.
 - Rétroéclairage : `/dev/disp`, ioctl `0x102` pour régler la luminosité brute
@@ -263,14 +266,21 @@ Règles :
   n'est contactée. Ouvrir Devices coupe la connexion en cours, la tentative de
   connexion et l'appairage en cours (cible du reconnecteur effacée, discoverable
   coupé, canal semi-ouvert libéré). **Connect** reste une action explicite.
-- F1 ouvre l'écran Devices depuis la vue controller. F1+F2 maintenu 1,5 s l'ouvre
-  aussi : aucun rapport HID n'est envoyé pendant le maintien. Un overlay
-  « Keep holding to open devices… » montre la progression.
+- **A Connect** affiche immédiatement une popup bloquante « Connecting to
+  <hôte> » avec une barre de chargement en color1 et le texte en color4. Elle
+  disparaît à la connexion, ou au bout de 15 s si l'hôte ne répond pas (la
+  cible est alors effacée).
+- Un seul composant de barre de chargement est utilisé partout, avec color1
+  comme couleur principale : mode déterminé pour le maintien de déconnexion
+  (1 s), mode indéterminé animé pour le splash et la connexion.
+- Menu+Start maintenu 1 s déconnecte et ouvre Devices depuis la vue Connected :
+  aucun rapport HID n'est envoyé pendant le maintien. Un overlay
+  « Keep holding to disconnect… » montre la progression. F1/F2 ne sortent pas
+  de cette vue ; elles restent des boutons L3/R3 pour l'hôte.
 - Dans l'écran Devices, la navigation est celle de NextUI : D-pad, **A** pour
   connecter l'hôte sélectionné (ou ouvrir **Pair a new device**) et **X** pour
   l'oublier. Dans un sous-écran, B revient et A valide. Dans l'écran Devices, B
-  quitte immédiatement l'application. F1 est un alias de retour et F2 de
-  validation. Les rapports HID sont neutralisés.
+  quitte immédiatement l'application. Les rapports HID sont neutralisés.
 - Seul l'écran Pairing rend l'adaptateur discoverable et accepte les canaux
   entrants ; Devices et ses sous-écrans les refusent.
 - Au retour à la vue controller, les rapports restent neutres jusqu'au
@@ -282,14 +292,16 @@ Règles :
   hôte déjà appairé.
 - **Pair a new device** reste disponible même avec un hôte connecté ; il ouvre
   l'écran d'appairage, où X permet de changer l'identité du prochain appairage.
-- À la connexion d'un hôte, la vue controller affiche l'hôte, le profil et les
-  derniers évènements de touches. Un compte à rebours de 10 s est affiché.
-  Après 10 s, le rétroéclairage passe à 0 ; les rapports HID continuent. Un
-  maintien de F1 ou F2 rallume l'écran sans déclencher l'action de la touche.
+- À la connexion d'un hôte, la vue controller est titrée **Connected** et
+  affiche l'hôte, le profil et la consigne d'extinction. Elle ne liste plus les
+  évènements de touches. Après 10 s, le rétroéclairage passe à 0 ; les rapports
+  HID continuent. Un appui simple Menu+Start rallume l'écran sans envoyer le
+  combo à l'hôte et réarme le cycle de 10 s.
 - Ouvrir l'écran Devices annule l'extinction programmée et coupe la session en
   cours.
-- Le bouton Menu envoie Home/Guide à l'hôte depuis la vue controller ; dans les écrans
-  d'interface, il est neutralisé.
+- Le bouton Menu seul envoie Home/Guide à l'hôte depuis la vue controller ;
+  Menu+Start est réservé au réveil et à la déconnexion. Dans les écrans
+  d'interface, Menu est neutralisé.
 - Sur Brick standard, les sticks sont absents : le descripteur les déclare
   centrés pour rester compatible.
 
@@ -324,19 +336,23 @@ reconstruire avant le test.
 - appairage macOS, Windows, Linux ;
 - tous les boutons, D-pad, gâchettes, Start/Select, Menu ;
 - Menu (bouton) : appui simple = Home/Guide, appui long sans effet ;
-- F1 ouvre l'écran Devices ; F1+F2 maintenu 1,5 s l'ouvre aussi ;
-- maintien F1+F2 : overlay « Keep holding to open devices… », HID neutralisé ;
-- navigation Devices/sous-écrans avec D-pad/A/B ; F1 retour, F2 validation ;
+- Menu+Start maintenu 1 s déconnecte et ouvre Devices ;
+- F1/F2 sans navigation, envoyées à l'hôte comme L3/R3 ;
+- maintien Menu+Start : overlay « Keep holding to disconnect… », HID neutralisé ;
+- appui simple Menu+Start sur écran éteint : réveil sans envoi à l'hôte ;
+- navigation Devices/sous-écrans avec D-pad/A/B ;
 - B dans l'écran Devices quitte immédiatement, sans confirmation ;
 - Écran Devices par défaut sans hôte, sans connexion automatique ;
 - Pair a new device reste listé et sélectionnable avec un hôte connecté ;
 - retour sur Devices : connexion en cours et appairage arrêtés ;
 - A Connect direct sur l'hôte sélectionné, avec le profil mémorisé ;
+- popup « Connecting to <hôte> » : blocage des entrées, barre color1 animée,
+  texte color4, disparition à la connexion ou après 15 s ;
 - X Forget dans Devices : confirmation, oubli de l'hôte, retour à la liste ;
 - choix PC/Xbox uniquement dans l'écran Pairing, puis réappairage complet ;
 - aucune fuite de D-pad/A/B/Menu/Start/Select vers l'hôte dans l'interface ;
-- compte à rebours de 10 s, extinction, rallumage par maintien F1 ou F2 ;
-- vue controller : derniers évènements de touches et profil ;
+- extinction après 10 s, rallumage par appui Menu+Start et nouveau cycle de 10 s ;
+- vue controller : titre « Connected », hôte et profil, sans liste d'évènements ;
 - choix PC/Xbox lors d'un nouvel appairage, redémarrage de session et réappairage ;
 - vibrations en mode Xbox : rapport 0x03 sur le canal interrupt et SET_REPORT,
   moteur arrêté à la déconnexion et à la sortie ;
