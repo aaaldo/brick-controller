@@ -139,7 +139,10 @@ mod tests {
     #[test]
     fn device_ids_use_the_hid_record_format() {
         assert_eq!(Profile::Pc.device_id(), None);
-        assert_eq!(Profile::Switch.device_id(), None);
+        assert_eq!(
+            Profile::Switch.device_id().as_deref(),
+            Some("usb:057E:2009:0000")
+        );
         assert_eq!(
             Profile::Xbox.device_id().as_deref(),
             Some("usb:045E:02FD:0408")

@@ -107,8 +107,12 @@ sub-screen is open, gamepad input is kept away from the host.
 
 The identity is chosen when pairing a new host:
 
-- **PC** is a generic HID gamepad. It works with Windows, macOS,
-  Linux/SteamOS, Android and iPadOS, and is the recommended default.
+- **PC** is a generic HID gamepad. It works with Windows, Linux/SteamOS,
+  Android, and with Mac/iPad apps that read HID directly (Steam, for example).
+  macOS's GameController framework only exposes known controller families, so
+  a generic pad does not appear in System Settings > Game Controllers and
+  GameController-based games ignore it. Use the Xbox, PlayStation or Switch
+  profile on Apple hosts.
 - **Xbox** advertises the Brick as an Xbox Wireless Controller
   (`045E:02FD`), for XInput on Windows and native Xbox support on macOS,
   iPadOS and Android. It reads the host's rumble output report.
@@ -117,9 +121,9 @@ The identity is chosen when pairing a new host:
   natively, including Windows, macOS, Linux, Android and iPadOS. It reads
   rumble from the host.
 - **Switch** presents a Switch Pro Controller (`057E:2009`, Bluetooth name
-  `Pro Controller`). It implements the Switch handshake and the 0x30/0x21
-  reports, so hosts that support the Pro Controller can use it. It reads
-  rumble from the host.
+  `Pro Controller`). The SDP Device ID advertises that USB identity, so macOS,
+  iPadOS and Windows bind their native Pro Controller driver. It implements the
+  Switch handshake and the 0x30/0x21 reports. It reads rumble from the host.
 
 Open **Pair a new device**, press **X** to choose the controller type, then pair
 from the host. Choosing another type restarts the Bluetooth session with the
