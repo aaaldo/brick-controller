@@ -102,6 +102,28 @@ impl Fonts {
         self.draw(canvas, text, centre_x - w / 2, baseline_y, size, colour);
     }
 
+    /// Baseline that places the inked glyph box of `text` on `centre_y`.
+    ///
+    /// Font metrics differ between the NextUI face and the embedded fallback;
+    /// using the real glyph bounds keeps a key label centred in its pill on
+    /// both.
+    pub fn centred_baseline(&mut self, text: &str, size: f32, centre_y: i32) -> i32 {
+        let mut bounds: Option<(i32, i32)> = None;
+        for ch in text.chars() {
+            let metrics = self.glyph(ch, size).metrics;
+            if metrics.width == 0 || metrics.height == 0 {
+                continue;
+            }
+            let top = metrics.ymin + metrics.height as i32;
+            let bottom = metrics.ymin;
+            bounds = Some(match bounds {
+                Some((top0, bottom0)) => (top0.max(top), bottom0.min(bottom)),
+                None => (top, bottom),
+            });
+        }
+        bounds.map_or(centre_y, |(top, bottom)| centre_y + (top + bottom) / 2)
+    }
+
     /// `text` cut to fit `max_w`, ending in an ellipsis when something was cut.
     pub fn ellipsize(&mut self, text: &str, size: f32, max_w: i32) -> String {
         if self.measure(text, size) <= max_w {
@@ -163,6 +185,22 @@ mod tests {
     fn a_missing_font_file_falls_back_to_the_embedded_face() {
         let mut fonts = Fonts::load(&["/nonexistent/font.ttf".to_string()]);
         assert!(fonts.measure("Tải ảnh", 30.0) > 0);
+    }
+
+    #[test]
+    fn a_centred_baseline_centres_the_inked_glyph_box() {
+        let mut fonts = Fonts::load(&[]);
+        let size = 27.0;
+        let centre = 100;
+        let baseline = fonts.centred_baseline("Menu", size, centre);
+        let (mut top, mut bottom) = (i32::MAX, i32::MIN);
+        for ch in "Menu".chars() {
+            let metrics = fonts.glyph(ch, size).metrics;
+            top = top.min(baseline - metrics.ymin - metrics.height as i32);
+            bottom = bottom.max(baseline - metrics.ymin);
+        }
+        // An odd glyph height cannot be split perfectly across one pixel.
+        assert!(((top + bottom) / 2 - centre).abs() <= 1);
     }
 
     #[test]

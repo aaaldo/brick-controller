@@ -6,9 +6,9 @@
 //! Two identities: a generic PC gamepad, and an Xbox Wireless Controller for
 //! XInput. The choice is kept per host and gives the host an identity it
 //! already knows. The screen follows NextUI's theme and layout: a Menu for
-//! pairing and host settings, and a controller view that shows the link state
-//! and recent input events. After a host connects the panel can switch off
-//! while reports keep flowing, until a function key is held.
+//! pairing and host selection, and a controller view that shows the host and
+//! profile. After a host connects the panel can switch off while reports keep
+//! flowing, until Menu+Start wakes it.
 
 mod bluez;
 use brick::canvas;
@@ -44,14 +44,14 @@ const VERSION: &str = match option_env!("BRICK_CONTROLLER_VERSION") {
 };
 const DATA_DIR: &str = "/mnt/SDCARD/.userdata/tg5040/brick-controller";
 
-/// Holding F1 and F2 together this long opens the menu without sending any
-/// gamepad input to the host.
-const MENU_CHORD_HOLD: Duration = Duration::from_millis(1500);
-/// After a host connects, the countdown stays visible this long, then the
-/// panel goes dark until a function key is held.
+/// Holding Menu and Start together this long disconnects from the host and
+/// returns to Devices, without sending either button to the host.
+const DISCONNECT_HOLD: Duration = Duration::from_millis(1000);
+/// How long the blocking "Connecting to…" popup waits before giving up.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+/// After a host connects, the panel stays on this long, then goes dark until
+/// Menu+Start is pressed once.
 const SCREEN_OFF_AFTER: Duration = Duration::from_secs(10);
-/// How long F1 or F2 must be held to wake a dark panel.
-const WAKE_HOLD: Duration = Duration::from_millis(700);
 /// Idle poll interval while the panel is off; nothing needs animation then.
 const SCREEN_OFF_POLL: i32 = 250;
 /// Between attempts to reach the host we were last paired with.
@@ -321,6 +321,15 @@ struct Frame {
     hold: Option<u8>,
 }
 
+impl Frame {
+    /// Splash and connection popup use an indeterminate bar; the renderer
+    /// keeps redrawing them so its segment moves.
+    fn animates(&self) -> bool {
+        matches!(&self.view, View::Splash { .. })
+            || self.modal.as_ref().is_some_and(|modal| modal.loading)
+    }
+}
+
 /// The screen, drawn on a thread of its own.
 ///
 /// Drawing a frame takes long enough on this CPU that doing it between
@@ -338,6 +347,10 @@ struct Renderer {
 /// gamepad is what has to be quick. Twenty frames a second keeps the pressed
 /// controls readable while leaving the CPU mostly to the HID loop.
 const FRAME_EVERY: Duration = Duration::from_millis(50);
+/// Redraw cadence for an indeterminate loading bar.
+const ANIMATION_EVERY: Duration = Duration::from_millis(120);
+/// One complete back-and-forth sweep of the indeterminate segment.
+const LOADING_PHASE: Duration = Duration::from_millis(1500);
 
 /// `gettid` is Linux-only; on a host build the process id is enough for the
 /// priority call, which only ever runs on the device anyway.
@@ -351,6 +364,37 @@ fn current_tid() -> i32 {
     unsafe { libc::getpid() }
 }
 
+fn draw_frame(
+    canvas: &mut Canvas,
+    fonts: &mut Fonts,
+    theme: &Theme,
+    frame: &Frame,
+    phase: f32,
+    drawn: &mut u32,
+) {
+    let started = Instant::now();
+    ui::draw(
+        canvas,
+        fonts,
+        theme,
+        &frame.view,
+        &frame.status,
+        frame.modal.as_ref(),
+        frame.hold.map(|step| step as f32 / 20.0),
+        phase,
+    );
+    let _ = canvas.flush();
+    // A few, to know what a frame costs on the device.
+    *drawn += 1;
+    if *drawn <= 5 {
+        eprintln!(
+            "screen: frame {} took {} ms",
+            *drawn,
+            started.elapsed().as_millis()
+        );
+    }
+}
+
 impl Renderer {
     fn spawn(mut canvas: Canvas, mut fonts: Fonts, theme: Theme) -> Self {
         let slot: Arc<(Mutex<Option<Option<Frame>>>, std::sync::Condvar)> = Arc::default();
@@ -360,11 +404,37 @@ impl Renderer {
             unsafe { libc::setpriority(libc::PRIO_PROCESS, current_tid() as _, 10) };
             let (lock, ready) = &*shared;
             let mut drawn = 0u32;
+            let mut current: Option<Frame> = None;
+            let animation_start = Instant::now();
             loop {
                 let next = {
                     let mut pending = lock.lock().unwrap();
-                    while pending.is_none() {
-                        pending = ready.wait(pending).unwrap();
+                    if pending.is_none() {
+                        if current.as_ref().is_some_and(Frame::animates) {
+                            let (guard, _) = ready.wait_timeout(pending, ANIMATION_EVERY).unwrap();
+                            pending = guard;
+                            if pending.is_none() {
+                                drop(pending);
+                                if let Some(frame) = current.as_ref() {
+                                    let phase = (animation_start.elapsed().as_secs_f32()
+                                        / LOADING_PHASE.as_secs_f32())
+                                    .fract();
+                                    draw_frame(
+                                        &mut canvas,
+                                        &mut fonts,
+                                        &theme,
+                                        frame,
+                                        phase,
+                                        &mut drawn,
+                                    );
+                                }
+                                continue;
+                            }
+                        } else {
+                            while pending.is_none() {
+                                pending = ready.wait(pending).unwrap();
+                            }
+                        }
                     }
                     pending.take().unwrap()
                 };
@@ -376,24 +446,11 @@ impl Renderer {
                         return;
                     }
                     Some(frame) => {
-                        ui::draw(
-                            &mut canvas,
-                            &mut fonts,
-                            &theme,
-                            &frame.view,
-                            &frame.status,
-                            frame.modal.as_ref(),
-                            frame.hold.map(|step| step as f32 / 20.0),
-                        );
-                        let _ = canvas.flush();
-                        // A few, to know what a frame costs on the device.
-                        drawn += 1;
-                        if drawn <= 5 {
-                            eprintln!(
-                                "screen: frame {drawn} took {} ms",
-                                started.elapsed().as_millis()
-                            );
-                        }
+                        let phase = (animation_start.elapsed().as_secs_f32()
+                            / LOADING_PHASE.as_secs_f32())
+                        .fract();
+                        draw_frame(&mut canvas, &mut fonts, &theme, &frame, phase, &mut drawn);
+                        current = Some(frame);
                     }
                 }
                 if let Some(rest) = FRAME_EVERY.checked_sub(started.elapsed()) {
@@ -508,101 +565,10 @@ enum Screen {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ModalState {
     Forget(usize),
+    Connecting(Addr),
 }
 
 type DrawKey = (View, StatusInfo, Option<Modal>, Option<u8>);
-
-#[derive(Clone)]
-struct InputMonitor {
-    started: Instant,
-    lines: Vec<String>,
-}
-
-impl InputMonitor {
-    const MAX_LINES: usize = 14;
-
-    fn new() -> Self {
-        Self {
-            started: Instant::now(),
-            lines: Vec::new(),
-        }
-    }
-
-    fn push(&mut self, line: impl Into<String>) {
-        let line = format!(
-            "{:>6.1}s  {}",
-            self.started.elapsed().as_secs_f32(),
-            line.into()
-        );
-        self.lines.push(line);
-        if self.lines.len() > Self::MAX_LINES {
-            self.lines.remove(0);
-        }
-    }
-}
-
-fn hat_label(hat: u8) -> &'static str {
-    match hat {
-        0 => "up",
-        1 => "up-right",
-        2 => "right",
-        3 => "down-right",
-        4 => "down",
-        5 => "down-left",
-        6 => "left",
-        7 => "up-left",
-        _ => "centred",
-    }
-}
-
-fn record_input(
-    monitor: &mut InputMonitor,
-    was: &hid::State,
-    now: &hid::State,
-    was_f1: bool,
-    f1: bool,
-    was_f2: bool,
-    f2: bool,
-) {
-    use hid::button;
-    let button = |monitor: &mut InputMonitor, number: u8, label: &str| {
-        if now.pressed(number) && !was.pressed(number) {
-            monitor.push(format!("{label} down"));
-        } else if was.pressed(number) && !now.pressed(number) {
-            monitor.push(format!("{label} up"));
-        }
-    };
-    button(monitor, button::SOUTH, "B");
-    button(monitor, button::EAST, "A");
-    button(monitor, button::NORTH, "X");
-    button(monitor, button::WEST, "Y");
-    button(monitor, button::L1, "L1");
-    button(monitor, button::R1, "R1");
-    button(monitor, button::SELECT, "SELECT");
-    button(monitor, button::START, "START");
-    button(monitor, button::HOME, "MENU");
-    if was.triggers[0] != now.triggers[0] {
-        monitor.push(format!("L2 {}", now.triggers[0]));
-    }
-    if was.triggers[1] != now.triggers[1] {
-        monitor.push(format!("R2 {}", now.triggers[1]));
-    }
-    if was.hat != now.hat {
-        monitor.push(format!("D-pad {}", hat_label(now.hat)));
-    }
-    if was.sticks != now.sticks {
-        monitor.push(format!(
-            "sticks {} {} {} {}",
-            now.sticks[0], now.sticks[1], now.sticks[2], now.sticks[3]
-        ));
-    }
-    if f1 != was_f1 {
-        monitor.push(if f1 { "F1 down" } else { "F1 up" });
-    }
-    if f2 != was_f2 {
-        monitor.push(if f2 { "F2 down" } else { "F2 up" });
-    }
-}
 
 impl Settings {
     fn load(bus: &bluez::Bus, pairing: Profile) -> Self {
@@ -711,8 +677,8 @@ fn open_devices(
     *settings = Settings::load(bus, profile);
 }
 
-/// Bluetooth up as the chosen controller, until F1+F2 is held or another host
-/// profile is selected.
+/// Bluetooth up as the chosen controller, until Menu+Start is held or another
+/// host profile is selected.
 fn session(
     profile: Profile,
     start_in_settings: bool,
@@ -784,16 +750,12 @@ fn session(
     let mut sent = None;
     let mut sent_at = Instant::now();
     let mut previous = pad.mapper.state;
-    // A restart can happen while a function key is held; start from the real
-    // state so it is not seen as a fresh press.
-    let mut previous_f1 = pad.mapper.f1;
-    let mut previous_f2 = pad.mapper.f2;
-    let mut chord_since: Option<Instant> = None;
-    let mut chord_seen = false;
+    let mut disconnect_since: Option<Instant> = None;
+    let mut combo_seen = false;
     let mut settings = Settings::load(&bus, profile);
     let mut state = Screen::Menu { cursor: 0 };
-    let mut modal: Option<ModalState> = None;
-    let mut events = InputMonitor::new();
+    let mut modal = connect.map(ModalState::Connecting);
+    let mut connect_deadline = connect.map(|_| Instant::now() + CONNECT_TIMEOUT);
     // The profile to switch to. A switch always comes from the menu, so the
     // new session reopens it. The host is reconnected only when the switch was
     // part of an explicit Connect.
@@ -801,10 +763,9 @@ fn session(
     let mut switch_connect: Option<Addr> = None;
     let mut drawn: Option<DrawKey> = None;
     let mut backlight = display::Backlight::open();
-    // A dark panel is woken only by holding a function key; `wake_used` keeps
-    // the release that follows from also opening a screen.
+    // A dark panel is woken by Menu+Start; `wake_used` keeps the same held
+    // chord from immediately starting the disconnect countdown.
     let mut screen_off = false;
-    let mut wake_since: Option<Instant> = None;
     let mut wake_used = false;
     let mut screen_off_at: Option<Instant> = None;
     // A gamepad button used in a menu must not be sent to the host when the
@@ -879,6 +840,9 @@ fn session(
                 Err(e) => return Err(format!("pad: {e}")),
             }
         }
+        // A quick Menu+Start tap may be released before this poll, so the
+        // mapper remembers that both buttons were down together.
+        let combo_tapped = pad.mapper.take_combo_tap();
 
         // New connections: the host opens control first, then interrupt.
         // Outside the pairing screen the channels are accepted and dropped so
@@ -942,7 +906,7 @@ fn session(
             settings = Settings::load(&bus, profile);
             state = Screen::Controller;
             modal = None;
-            events = InputMonitor::new();
+            connect_deadline = None;
             screen_off_at = Some(Instant::now() + SCREEN_OFF_AFTER);
             resume_after_release = false;
             drawn = None;
@@ -1025,74 +989,73 @@ fn session(
             if screen_off {
                 backlight.on();
                 screen_off = false;
-                wake_since = None;
                 wake_used = false;
             }
             state = Screen::Menu { cursor: 0 };
             modal = None;
-            events = InputMonitor::new();
+            connect_deadline = None;
             screen_off_at = None;
             drawn = None;
             lost = false;
         }
 
+        // The popup blocks input, so it must release the user when the host
+        // never answers. Clearing the target also drops a stale link attempt.
+        if matches!(modal, Some(ModalState::Connecting(_)))
+            && connect_deadline.is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            eprintln!("menu: connection timed out");
+            stop_devices_session(
+                &mut link,
+                &mut half,
+                &bus,
+                &target,
+                &connected,
+                motor.as_ref(),
+            );
+            modal = None;
+            connect_deadline = None;
+            state = Screen::Menu { cursor: 0 };
+            drawn = None;
+        }
+
         let now = pad.mapper.state;
-        let f1_now = pad.mapper.f1;
-        let f2_now = pad.mapper.f2;
-        let f1_pressed = f1_now && !previous_f1;
-        let f1_released = previous_f1 && !f1_now;
-        let f2_pressed = f2_now && !previous_f2;
-        let f2_released = previous_f2 && !f2_now;
         let a_pressed = now.pressed(hid::button::EAST) && !previous.pressed(hid::button::EAST);
         let b_pressed = now.pressed(hid::button::SOUTH) && !previous.pressed(hid::button::SOUTH);
         let x_pressed = now.pressed(hid::button::NORTH) && !previous.pressed(hid::button::NORTH);
         let direction = nav_dir(previous.hat, now.hat);
+        let combos = now.pressed(hid::button::HOME) && now.pressed(hid::button::START);
+        let combo_was = previous.pressed(hid::button::HOME) && previous.pressed(hid::button::START);
 
-        // The event log feeds the controller view; while a menu is open the
-        // same buttons navigate and never reach the host.
-        if link.is_some() && matches!(state, Screen::Controller) {
-            record_input(
-                &mut events,
-                &previous,
-                &now,
-                previous_f1,
-                f1_now,
-                previous_f2,
-                f2_now,
-            );
-        }
-
-        // Touching a function key keeps the panel on: the countdown is only
-        // for a session left alone after pairing.
-        if !screen_off && (f1_pressed || f2_pressed) {
+        // Interacting with the chord keeps the panel on while it is held,
+        // except for the hold that just woke it: that one must leave the
+        // 10-second cycle armed.
+        if !screen_off && combos && !wake_used {
             screen_off_at = None;
-            drawn = None;
         }
 
-        // A dark panel is woken by holding either function key. Nothing else
-        // reaches the app until the key is released, so the wake cannot also
-        // open the menu or start the chord.
+        // A dark panel is woken by pressing Menu+Start once. The same held
+        // chord must not start the disconnect countdown, and the buttons are
+        // kept away from the host until they are released.
         if screen_off {
-            if f1_now || f2_now {
-                let since = wake_since.get_or_insert_with(Instant::now);
-                if since.elapsed() >= WAKE_HOLD {
+            if combos || combo_tapped {
+                combo_seen = true;
+                if !combo_was {
                     backlight.on();
                     screen_off = false;
                     wake_used = true;
-                    wake_since = None;
+                    screen_off_at = Some(Instant::now() + SCREEN_OFF_AFTER);
                     drawn = None;
                 }
             } else {
-                wake_since = None;
-                wake_used = false;
+                combo_seen = false;
             }
         } else if !wake_used {
-            let chord_was_seen = chord_seen;
-            let both = f1_now && f2_now;
-            if both {
-                chord_seen = true;
-                let since = chord_since.get_or_insert_with(Instant::now);
-                if since.elapsed() >= MENU_CHORD_HOLD && matches!(state, Screen::Controller) {
+            let combo_was_seen = combo_seen;
+            if combos {
+                combo_seen = true;
+                let since = disconnect_since.get_or_insert_with(Instant::now);
+                if since.elapsed() >= DISCONNECT_HOLD && matches!(state, Screen::Controller) {
                     open_devices(
                         &mut link,
                         &mut half,
@@ -1105,25 +1068,24 @@ fn session(
                     );
                     state = Screen::Menu { cursor: 0 };
                     modal = None;
-                    events = InputMonitor::new();
                     screen_off_at = None;
                     drawn = None;
                 }
             } else {
-                chord_since = None;
+                disconnect_since = None;
             }
-            if !f1_now && !f2_now {
-                chord_seen = false;
+            if !combos {
+                combo_seen = false;
             }
-            let chord_suppress = chord_seen || (chord_was_seen && !f1_now && !f2_now);
-            let back = b_pressed || f1_released;
-            let confirm = a_pressed || f2_released;
+            let combo_suppress = combo_seen || (combo_was_seen && !combos);
+            let back = b_pressed;
+            let confirm = a_pressed;
 
-            if !chord_suppress {
+            if !combo_suppress {
                 if let Some(pending) = modal {
-                    if confirm {
-                        match pending {
-                            ModalState::Forget(index) => {
+                    match pending {
+                        ModalState::Forget(index) => {
+                            if confirm {
                                 if let Some(host) = settings.hosts.get(index) {
                                     let addr = host.addr;
                                     eprintln!("menu: forget {addr}");
@@ -1143,11 +1105,14 @@ fn session(
                                 }
                                 modal = None;
                                 drawn = None;
+                            } else if back {
+                                modal = None;
+                                drawn = None;
                             }
                         }
-                    } else if back {
-                        modal = None;
-                        drawn = None;
+                        // The connection popup owns the screen until the link
+                        // comes up or its timeout expires.
+                        ModalState::Connecting(_) => {}
                     }
                 } else {
                     match state.clone() {
@@ -1213,6 +1178,9 @@ fn session(
                                                 bus.trust(addr);
                                                 save_host(Some(addr));
                                                 *target.lock().unwrap() = Some(addr);
+                                                modal = Some(ModalState::Connecting(addr));
+                                                connect_deadline =
+                                                    Some(Instant::now() + CONNECT_TIMEOUT);
                                                 if desired != profile {
                                                     switch_to = Some(desired);
                                                     switch_connect = Some(addr);
@@ -1225,9 +1193,6 @@ fn session(
                                     }
                                     drawn = None;
                                 }
-                            } else if f1_released && link.is_some() {
-                                state = Screen::Controller;
-                                drawn = None;
                             }
                         }
                         Screen::Profile { choice } => {
@@ -1288,39 +1253,15 @@ fn session(
                             }
                         }
                         Screen::Controller => {
-                            // F1 is the short way to the menu; the F1+F2 hold
-                            // is handled above, before this match.
-                            if f1_released {
-                                open_devices(
-                                    &mut link,
-                                    &mut half,
-                                    &bus,
-                                    &mut settings,
-                                    profile,
-                                    &target,
-                                    &connected,
-                                    motor.as_ref(),
-                                );
-                                state = Screen::Menu { cursor: 0 };
-                                events = InputMonitor::new();
-                                screen_off_at = None;
-                                drawn = None;
-                            }
+                            // Leaving the Connected view is reserved for the
+                            // Menu+Start hold, handled above this match.
                         }
                     }
                 }
             }
         }
 
-        if f1_now != previous_f1 {
-            eprintln!("ui: f1 {f1_now}");
-        }
-        if f2_now != previous_f2 {
-            eprintln!("ui: f2 {f2_now}");
-        }
-        previous_f1 = f1_now;
-        previous_f2 = f2_now;
-        if !f1_now && !f2_now {
+        if !combos {
             wake_used = false;
         }
 
@@ -1350,7 +1291,7 @@ fn session(
             resume_after_release = false;
         }
         last_ui_active = ui_active;
-        let report_state = if ui_active || chord_seen || resume_after_release {
+        let report_state = if ui_active || combo_seen || resume_after_release {
             hid::State::default()
         } else {
             now
@@ -1407,12 +1348,11 @@ fn session(
             if screen_off {
                 backlight.on();
                 screen_off = false;
-                wake_since = None;
                 wake_used = false;
             }
             state = Screen::Menu { cursor: 0 };
             modal = None;
-            events = InputMonitor::new();
+            connect_deadline = None;
             screen_off_at = None;
             drawn = None;
         }
@@ -1423,27 +1363,12 @@ fn session(
         }
 
         let status = StatusInfo::read(true);
-        let countdown = screen_off_at.map(|deadline| {
-            let seconds = deadline
-                .saturating_duration_since(Instant::now())
-                .as_secs()
-                .max(1);
-            format!("Screen off in {seconds} s · hold F1 or F2 to wake")
-        });
         let target_addr = *target.lock().unwrap();
-        let view = view_for(
-            &state,
-            &settings,
-            link.as_ref(),
-            &events,
-            countdown,
-            profile,
-            target_addr,
-        );
+        let view = view_for(&state, &settings, link.as_ref(), profile, target_addr);
         let modal_view = modal.as_ref().map(|pending| modal_view(pending, &settings));
-        let hold = if chord_seen && matches!(state, Screen::Controller) && !screen_off {
-            chord_since.map(|since| {
-                ((since.elapsed().as_secs_f32() / MENU_CHORD_HOLD.as_secs_f32()).clamp(0.0, 1.0)
+        let hold = if combo_seen && matches!(state, Screen::Controller) && !screen_off {
+            disconnect_since.map(|since| {
+                ((since.elapsed().as_secs_f32() / DISCONNECT_HOLD.as_secs_f32()).clamp(0.0, 1.0)
                     * 20.0) as u8
             })
         } else {
@@ -1509,8 +1434,6 @@ fn view_for(
     screen: &Screen,
     settings: &Settings,
     link: Option<&Link>,
-    events: &InputMonitor,
-    countdown: Option<String>,
     profile: Profile,
     target: Option<Addr>,
 ) -> View {
@@ -1518,9 +1441,6 @@ fn view_for(
         Screen::Controller => View::Controller {
             host: link.map(|l| l.name.clone()).unwrap_or_default(),
             profile: profile.label(),
-            connected: link.is_some(),
-            events: events.lines.clone(),
-            countdown,
         },
         Screen::Menu { cursor } => {
             let rows = settings.rows();
@@ -1582,6 +1502,22 @@ fn modal_view(modal: &ModalState, settings: &Settings) -> Modal {
                 message: "You will need to pair it again from the host.".into(),
                 confirm: "Forget",
                 destructive: true,
+                loading: false,
+            }
+        }
+        ModalState::Connecting(addr) => {
+            let name = settings
+                .hosts
+                .iter()
+                .find(|host| host.addr == *addr)
+                .map(|host| host.name.clone())
+                .unwrap_or_else(|| addr.to_string());
+            Modal {
+                title: format!("Connecting to {name}"),
+                message: String::new(),
+                confirm: "",
+                destructive: false,
+                loading: true,
             }
         }
     }
@@ -1690,13 +1626,6 @@ mod tests {
         let _ = fs::create_dir_all(&dir);
         let theme = Theme::fallback();
         let mut fonts = Fonts::load(&[]);
-        let events = vec![
-            "  1.2 s  A down".into(),
-            "  1.4 s  B down".into(),
-            "  1.8 s  D-pad up-right".into(),
-            "  2.1 s  R2 120".into(),
-            "  2.3 s  F1 down".into(),
-        ];
         let screens: Vec<(&str, View, StatusInfo)> = vec![
             (
                 "splash",
@@ -1710,9 +1639,6 @@ mod tests {
                 View::Controller {
                     host: "MacBook Pro".into(),
                     profile: "PC",
-                    connected: true,
-                    events,
-                    countdown: Some("Screen off in 9 s · hold F1 or F2 to wake".into()),
                 },
                 preview_status(true),
             ),
@@ -1762,7 +1688,16 @@ mod tests {
         ];
         for (name, view, status) in screens {
             let mut canvas = Canvas::in_memory(1024, 768);
-            ui::draw(&mut canvas, &mut fonts, &theme, &view, &status, None, None);
+            ui::draw(
+                &mut canvas,
+                &mut fonts,
+                &theme,
+                &view,
+                &status,
+                None,
+                None,
+                0.35,
+            );
             png::write_png(
                 &format!("{dir}/{name}.png"),
                 1024,
@@ -1777,6 +1712,7 @@ mod tests {
             message: "You will need to pair it again from the host.".into(),
             confirm: "Forget",
             destructive: true,
+            loading: false,
         };
         let mut canvas = Canvas::in_memory(1024, 768);
         ui::draw(
@@ -1789,6 +1725,7 @@ mod tests {
             &preview_status(true),
             Some(&modal),
             None,
+            0.35,
         );
         png::write_png(
             &format!("{dir}/confirm.png"),
@@ -1798,12 +1735,37 @@ mod tests {
         )
         .unwrap();
 
+        let connecting = Modal {
+            title: "Connecting to MacBook Pro".into(),
+            message: String::new(),
+            confirm: "",
+            destructive: false,
+            loading: true,
+        };
+        let mut canvas = Canvas::in_memory(1024, 768);
+        ui::draw(
+            &mut canvas,
+            &mut fonts,
+            &theme,
+            &View::Menu {
+                rows: preview_menu_rows(true),
+            },
+            &preview_status(true),
+            Some(&connecting),
+            None,
+            0.35,
+        );
+        png::write_png(
+            &format!("{dir}/connecting.png"),
+            1024,
+            768,
+            &canvas.snapshot_rgb(),
+        )
+        .unwrap();
+
         let controller = View::Controller {
             host: "MacBook Pro".into(),
             profile: "PC",
-            connected: true,
-            events: vec!["  1.2 s  A down".into()],
-            countdown: None,
         };
         let mut canvas = Canvas::in_memory(1024, 768);
         ui::draw(
@@ -1814,6 +1776,7 @@ mod tests {
             &preview_status(true),
             None,
             Some(0.72),
+            0.35,
         );
         png::write_png(
             &format!("{dir}/hold.png"),

@@ -12,8 +12,6 @@ use brick::text::Fonts;
 use std::collections::HashMap;
 use std::process::Command;
 
-pub const OK: Rgb = Rgb(0xb8, 0xbb, 0x26);
-pub const WARN: Rgb = Rgb(0xfa, 0xbd, 0x2f);
 pub const ERROR: Rgb = Rgb(0xfb, 0x49, 0x34);
 
 const HINT_SIZE: f32 = 36.0;
@@ -22,6 +20,8 @@ const ITEM_SIZE: f32 = 48.0;
 const KEY_SIZE: f32 = 27.0;
 const TITLE_SIZE: f32 = 72.0;
 const ROW_H: i32 = 90;
+const SCREEN_OFF_HINT: &str =
+    "Screen will switch off after 10s. Press Menu+Start once to wake it up";
 
 /// NextUI's colour slots, loaded from `nextval.elf` when it is available.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -312,6 +312,8 @@ pub struct Modal {
     pub message: String,
     pub confirm: &'static str,
     pub destructive: bool,
+    /// Indeterminate loading popup.
+    pub loading: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -322,9 +324,6 @@ pub enum View {
     Controller {
         host: String,
         profile: &'static str,
-        connected: bool,
-        events: Vec<String>,
-        countdown: Option<String>,
     },
     Menu {
         rows: Vec<Row>,
@@ -346,6 +345,7 @@ pub enum View {
 }
 
 /// Draw one frame. A modal or a hold overlay can sit on top of any screen.
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     canvas: &mut Canvas,
     fonts: &mut Fonts,
@@ -354,29 +354,15 @@ pub fn draw(
     status: &StatusInfo,
     modal: Option<&Modal>,
     hold: Option<f32>,
+    phase: f32,
 ) {
     canvas.clear(theme.background);
     match view {
-        View::Splash { message } => draw_splash(canvas, fonts, theme, message),
-        View::Controller {
-            host,
-            profile,
-            connected,
-            events,
-            countdown,
-        } => {
-            header(canvas, fonts, theme, status, "Brick Controller");
-            draw_controller(
-                canvas,
-                fonts,
-                theme,
-                host,
-                profile,
-                *connected,
-                events,
-                countdown.as_deref(),
-            );
-            footer(canvas, fonts, theme, &[item("F1", "Devices")], &[]);
+        View::Splash { message } => draw_splash(canvas, fonts, theme, message, phase),
+        View::Controller { host, profile } => {
+            header(canvas, fonts, theme, status, "Connected");
+            draw_controller(canvas, fonts, theme, host, profile);
+            disconnect_hint(canvas, fonts, theme);
         }
         View::Menu { rows } => {
             header(canvas, fonts, theme, status, "Devices");
@@ -452,7 +438,7 @@ pub fn draw(
     }
 
     if let Some(modal) = modal {
-        draw_modal(canvas, fonts, theme, modal);
+        draw_modal(canvas, fonts, theme, modal, phase);
     }
     if let Some(progress) = hold {
         draw_hold(canvas, fonts, theme, progress);
@@ -475,7 +461,7 @@ fn header(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, status: &Status
     draw_status(canvas, fonts, theme, status);
 }
 
-fn draw_splash(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, message: &str) {
+fn draw_splash(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, message: &str, phase: f32) {
     let centre = canvas.width() / 2;
     fonts.draw_centred(
         canvas,
@@ -493,119 +479,44 @@ fn draw_splash(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, message: &
         HINT_SIZE,
         hint_text(theme),
     );
-    let cy = canvas.height() / 2 + s(canvas, 100);
-    circle(canvas, centre, cy, s(canvas, 28), theme.accent);
-    circle(canvas, centre, cy, s(canvas, 22), theme.background);
+    let bar_w = s(canvas, 420);
+    let bar_h = s(canvas, 18);
+    loading_bar(
+        canvas,
+        theme,
+        centre - bar_w / 2,
+        canvas.height() / 2 + s(canvas, 90),
+        bar_w,
+        bar_h,
+        Loading::Indeterminate(phase),
+    );
 }
 
-#[allow(clippy::too_many_arguments)]
 fn draw_controller(
     canvas: &mut Canvas,
     fonts: &mut Fonts,
     theme: &Theme,
     host: &str,
     profile: &str,
-    connected: bool,
-    events: &[String],
-    countdown: Option<&str>,
 ) {
     let left = s(canvas, 30);
-    let top = s(canvas, 132);
-    let status = if connected { "Connected" } else { "Waiting" };
-    let status_colour = if connected { OK } else { WARN };
-    circle(
-        canvas,
-        left + s(canvas, 10),
-        top + s(canvas, 20),
-        s(canvas, 10),
-        status_colour,
-    );
-    fonts.draw(
-        canvas,
-        status,
-        left + s(canvas, 34),
-        top + s(canvas, 44),
-        TITLE_SIZE,
-        status_colour,
-    );
-    let host = fonts.ellipsize(host, ITEM_SIZE, canvas.width() - s(canvas, 60));
-    fonts.draw(
-        canvas,
-        &host,
-        left,
-        top + s(canvas, 104),
-        ITEM_SIZE,
-        theme.text,
-    );
+    let max_w = canvas.width() - left * 2;
+    let top = canvas.height() / 2 - s(canvas, 120);
+    let host = fonts.ellipsize(host, ITEM_SIZE, max_w);
+    fonts.draw(canvas, &host, left, top, ITEM_SIZE, theme.text);
     fonts.draw(
         canvas,
         &format!("Profile {profile} · Bluetooth HID"),
         left,
-        top + s(canvas, 146),
-        SMALL_SIZE,
+        top + s(canvas, 72),
+        HINT_SIZE,
         hint_text(theme),
     );
 
-    let events_top = s(canvas, 330);
-    fonts.draw(
-        canvas,
-        "RECENT EVENTS",
-        left,
-        events_top,
-        SMALL_SIZE,
-        hint_text(theme),
-    );
-    if events.is_empty() {
-        fonts.draw(
-            canvas,
-            "Press a button…",
-            left,
-            events_top + s(canvas, 46),
-            ITEM_SIZE,
-            hint_text(theme),
-        );
-    } else {
-        let visible = events.len().min(5);
-        let start = events.len() - visible;
-        for (i, line) in events[start..].iter().enumerate() {
-            fonts.draw(
-                canvas,
-                line,
-                left,
-                events_top + s(canvas, 46) + i as i32 * s(canvas, 42),
-                SMALL_SIZE,
-                theme.text,
-            );
-        }
-    }
-
-    let hint_y = canvas.height() - s(canvas, 154);
-    if let Some(countdown) = countdown {
-        fonts.draw(
-            canvas,
-            "Hold F1+F2 for Devices.",
-            left,
-            canvas.height() - s(canvas, 190),
-            SMALL_SIZE,
-            hint_text(theme),
-        );
-        fonts.draw(
-            canvas,
-            countdown,
-            left,
-            hint_y,
-            SMALL_SIZE,
-            hint_text(theme),
-        );
-    } else {
-        fonts.draw(
-            canvas,
-            "Hold F1+F2 for Devices.",
-            left,
-            hint_y,
-            SMALL_SIZE,
-            hint_text(theme),
-        );
+    let mut y = top + s(canvas, 180);
+    for line in fonts.wrap(SCREEN_OFF_HINT, HINT_SIZE, max_w, 3) {
+        fonts.draw(canvas, &line, left, y, HINT_SIZE, hint_text(theme));
+        y += s(canvas, 48);
     }
 }
 
@@ -869,6 +780,74 @@ fn key_width(canvas: &Canvas, fonts: &mut Fonts, key: &str) -> i32 {
     }
 }
 
+fn draw_key(
+    canvas: &mut Canvas,
+    fonts: &mut Fonts,
+    theme: &Theme,
+    key: &str,
+    x: i32,
+    y: i32,
+) -> i32 {
+    let width = key_width(canvas, fonts, key);
+    let size = if key.chars().count() == 1 {
+        HINT_SIZE
+    } else {
+        KEY_SIZE
+    };
+    round_rect(
+        canvas,
+        x,
+        y,
+        width,
+        s(canvas, 60),
+        s(canvas, 30),
+        theme.highlight,
+    );
+    let baseline = fonts.centred_baseline(key, size, y + s(canvas, 30));
+    fonts.draw_centred(canvas, key, x + width / 2, baseline, size, key_text(theme));
+    width
+}
+
+fn disconnect_hint(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme) {
+    let margin = s(canvas, 30);
+    let gap = s(canvas, 15);
+    let pad = s(canvas, 15);
+    let h = s(canvas, 90);
+    let y = canvas.height() - margin - h;
+    let label = "Disconnect (Hold)";
+    let plus = "+";
+    let menu_w = key_width(canvas, fonts, "Menu");
+    let start_w = key_width(canvas, fonts, "Start");
+    let plus_w = fonts.measure(plus, HINT_SIZE);
+    let width =
+        pad * 2 + menu_w + gap + plus_w + gap + start_w + gap + fonts.measure(label, HINT_SIZE);
+    let outer = outer_style(theme);
+    round_rect(canvas, margin, y, width, h, h / 2, outer.fill);
+
+    let mut x = margin + pad;
+    x += draw_key(canvas, fonts, theme, "Menu", x, y + pad);
+    x += gap;
+    fonts.draw_centred(
+        canvas,
+        plus,
+        x + plus_w / 2,
+        y + h / 2 + s(canvas, 12),
+        HINT_SIZE,
+        outer.text,
+    );
+    x += plus_w + gap;
+    x += draw_key(canvas, fonts, theme, "Start", x, y + pad);
+    x += gap;
+    fonts.draw(
+        canvas,
+        label,
+        x,
+        y + h / 2 + s(canvas, 12),
+        HINT_SIZE,
+        outer.text,
+    );
+}
+
 fn draw_group(
     canvas: &mut Canvas,
     fonts: &mut Fonts,
@@ -881,36 +860,11 @@ fn draw_group(
     let width = group_width(canvas, fonts, items);
     let h = s(canvas, 90);
     let outer = outer_style(theme);
-    let key_fill = theme.highlight;
-    let key_colour = key_text(theme);
     round_rect(canvas, x, y, width, h, h / 2, outer.fill);
     let gap = s(canvas, 15);
     let mut cx = x + gap;
     for item in items {
-        let kw = key_width(canvas, fonts, item.key);
-        let key_size = if item.key.chars().count() == 1 {
-            HINT_SIZE
-        } else {
-            KEY_SIZE
-        };
-        round_rect(
-            canvas,
-            cx,
-            y + gap,
-            kw,
-            s(canvas, 60),
-            s(canvas, 30),
-            key_fill,
-        );
-        fonts.draw_centred(
-            canvas,
-            item.key,
-            cx + kw / 2,
-            y + gap + s(canvas, 30) + s(canvas, 14),
-            key_size,
-            key_colour,
-        );
-        cx += kw + gap;
+        cx += draw_key(canvas, fonts, theme, item.key, cx, y + gap) + gap;
         fonts.draw(
             canvas,
             item.label,
@@ -924,25 +878,47 @@ fn draw_group(
     width
 }
 
-fn draw_modal(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, modal: &Modal) {
+fn draw_modal(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, modal: &Modal, phase: f32) {
     let w = canvas.width();
     let h = canvas.height();
     canvas.blend_rect(0, 0, w, h, Rgb(0, 0, 0), 180);
     let box_w = s(canvas, 780);
+    let surface = mix(theme.background, theme.text, 0.07);
+
+    if modal.loading {
+        let box_h = s(canvas, 280);
+        let box_x = (w - box_w) / 2;
+        let box_y = (h - box_h) / 2;
+        round_rect(canvas, box_x, box_y, box_w, box_h, s(canvas, 30), surface);
+        let title = fonts.ellipsize(&modal.title, ITEM_SIZE, box_w - s(canvas, 80));
+        fonts.draw_centred(
+            canvas,
+            &title,
+            w / 2,
+            box_y + s(canvas, 120),
+            ITEM_SIZE,
+            theme.text,
+        );
+        let bar_w = s(canvas, 520);
+        let bar_h = s(canvas, 18);
+        loading_bar(
+            canvas,
+            theme,
+            (w - bar_w) / 2,
+            box_y + s(canvas, 190),
+            bar_w,
+            bar_h,
+            Loading::Indeterminate(phase),
+        );
+        return;
+    }
+
     let lines = fonts.wrap(&modal.message, SMALL_SIZE, box_w - s(canvas, 80), 3);
     let line_h = s(canvas, 44);
     let box_h = s(canvas, 170) + lines.len() as i32 * line_h + s(canvas, 110);
     let box_x = (w - box_w) / 2;
     let box_y = (h - box_h) / 2;
-    round_rect(
-        canvas,
-        box_x,
-        box_y,
-        box_w,
-        box_h,
-        s(canvas, 30),
-        mix(theme.background, theme.text, 0.07),
-    );
+    round_rect(canvas, box_x, box_y, box_w, box_h, s(canvas, 30), surface);
     fonts.draw_centred(
         canvas,
         &modal.title,
@@ -986,6 +962,61 @@ fn draw_modal(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, modal: &Mod
     let _ = modal.destructive;
 }
 
+#[derive(Clone, Copy)]
+enum Loading {
+    /// Known duration: the main-colour fill grows from the left.
+    Determinate(f32),
+    /// Unknown duration: a main-colour segment sweeps back and forth.
+    Indeterminate(f32),
+}
+
+/// The single loading indicator, shared by the splash, the connecting popup
+/// and the disconnect hold.
+fn loading_bar(
+    canvas: &mut Canvas,
+    theme: &Theme,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    loading: Loading,
+) {
+    let track = mix(theme.background, theme.text, 0.15);
+    round_rect(canvas, x, y, width, height, height / 2, track);
+    match loading {
+        Loading::Determinate(progress) => {
+            let filled = (width as f32 * progress.clamp(0.0, 1.0)) as i32;
+            if filled > 0 {
+                round_rect(
+                    canvas,
+                    x,
+                    y,
+                    filled.max(height),
+                    height,
+                    height / 2,
+                    theme.highlight,
+                );
+            }
+        }
+        Loading::Indeterminate(phase) => {
+            let segment = (width as f32 * 0.32) as i32;
+            let travel = (width - segment).max(1);
+            let t = (phase.rem_euclid(1.0) * 2.0).min(2.0);
+            let t = if t <= 1.0 { t } else { 2.0 - t };
+            let segment_x = x + (travel as f32 * t) as i32;
+            round_rect(
+                canvas,
+                segment_x,
+                y,
+                segment,
+                height,
+                height / 2,
+                theme.highlight,
+            );
+        }
+    }
+}
+
 fn draw_hold(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, progress: f32) {
     let w = canvas.width();
     let h = canvas.height();
@@ -1005,7 +1036,7 @@ fn draw_hold(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, progress: f3
     );
     fonts.draw_centred(
         canvas,
-        "Keep holding to open devices…",
+        "Keep holding to disconnect…",
         w / 2,
         box_y + s(canvas, 72),
         ITEM_SIZE,
@@ -1013,7 +1044,7 @@ fn draw_hold(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, progress: f3
     );
     fonts.draw_centred(
         canvas,
-        "Input is paused while both function keys are held.",
+        "Input is paused while Menu and Start are held.",
         w / 2,
         box_y + s(canvas, 118),
         SMALL_SIZE,
@@ -1021,29 +1052,15 @@ fn draw_hold(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, progress: f3
     );
     let bar_w = s(canvas, 700);
     let bar_h = s(canvas, 18);
-    let bar_x = (w - bar_w) / 2;
-    let bar_y = box_y + s(canvas, 178);
-    round_rect(
+    loading_bar(
         canvas,
-        bar_x,
-        bar_y,
+        theme,
+        (w - bar_w) / 2,
+        box_y + s(canvas, 178),
         bar_w,
         bar_h,
-        bar_h / 2,
-        mix(theme.background, theme.text, 0.15),
+        Loading::Determinate(progress),
     );
-    let filled = (bar_w as f32 * progress.clamp(0.0, 1.0)) as i32;
-    if filled > 0 {
-        round_rect(
-            canvas,
-            bar_x,
-            bar_y,
-            filled.max(bar_h),
-            bar_h,
-            bar_h / 2,
-            theme.accent,
-        );
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
