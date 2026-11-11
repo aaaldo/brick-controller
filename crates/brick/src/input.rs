@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 //! The pad, read straight from its evdev node (as Truepod does).
+//!
+//! This is the scripted-input harness used to exercise screens without a
+//! person at the buttons. The application's real evdev reader, with the Brick's
+//! key mapping and Menu+Start detection, lives in
+//! `apps/brick-controller/src/pad.rs`; do not confuse the two `Pad` types.
 
 use std::collections::VecDeque;
 use std::fs::File;

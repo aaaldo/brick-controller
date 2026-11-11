@@ -71,10 +71,15 @@ fi
 # settings after the app had the panel dark or changed the mixer.
 SYNC_SETTINGS="${SYSTEM_PATH:-}/bin/syncsettings.elf"
 
+# Remember whether Bluetooth was already up: a user who launched the Pak with
+# Bluetooth off must not get it switched on behind their back at exit.
 BT_WAS_ON=0
 pidof bluetoothd >/dev/null 2>&1 && BT_WAS_ON=1
 
 cleanup() {
+    # Order matters. The binary restores the backlight and its own Bluetooth
+    # daemon first; syncsettings then puts NextUI's shared settings back over
+    # it. Starting bt_init last avoids fighting the binary's own restore.
     "$DIR/brick-controller" restore >>"$LOG" 2>&1
     if [ -x "$SYNC_SETTINGS" ]; then
         # syncsettings links libmsettings from the NextUI system folder.

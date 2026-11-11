@@ -7,6 +7,21 @@
 //! which L2CAP channels to open (17 control, 19 interrupt), and the report
 //! descriptor itself. The attribute layout follows the HID profile; the IDs
 //! are its own (0x0200-0x020E).
+//!
+//! The attributes a host actually relies on:
+//!
+//! | Attribute | Contents |
+//! |---|---|
+//! | 0x0001 | HID service class |
+//! | 0x0004 | L2CAP control PSM 0x11 |
+//! | 0x000d | L2CAP interrupt PSM 0x13 |
+//! | 0x0100 | service name, shown while pairing |
+//! | 0x0202 | HID subclass: 0x08 is a gamepad |
+//! | 0x0206 | report descriptor, hex-encoded |
+//! | 0x020b/0x020c | HID and device release numbers |
+//!
+//! The remaining attributes are present because BlueZ and some hosts expect a
+//! complete record; their values are deliberately conservative.
 
 use std::fmt::Write;
 

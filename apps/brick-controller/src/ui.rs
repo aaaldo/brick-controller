@@ -6,7 +6,17 @@
 //! The layout follows Apostrophe's NextUI metrics (MIT): a 1024-wide reference,
 //! a 3x device scale on the Brick, 30 px screen padding, 90 px pills, a 120 px
 //! header/footer and the NextUI colour keys from `nextval.elf`.
+//!
+//! The platform readings (battery, Wi-Fi, clock) live in
+//! `platform/status.rs`; this module only draws the resulting `StatusInfo`.
+//! The renderer thread is in `ui/renderer.rs` so the drawing and the HID loop
+//! stay independent.
 
+pub mod renderer;
+
+pub use renderer::{Frame, Renderer};
+
+use crate::platform::StatusInfo;
 use brick::canvas::{Canvas, Rgb};
 use brick::text::Fonts;
 use std::collections::HashMap;
@@ -24,6 +34,12 @@ const SCREEN_OFF_HINT: &str =
     "Screen will switch off after 10s. Press Menu+Start once to wake it up";
 
 /// NextUI's colour slots, loaded from `nextval.elf` when it is available.
+///
+/// The fields keep NextUI's numeric names (`color1`..`color7`) in their doc
+/// comments because that is how themes are authored. Prefer the role names in
+/// drawing code: `highlight` is the selected surface, `text` is body copy, and
+/// so on. This keeps a theme swap from turning into a search for colour
+/// numbers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Theme {
     /// Main Color (color1): selected row and inner button surface.
@@ -202,84 +218,6 @@ pub fn font_paths() -> Vec<String> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StatusInfo {
-    pub clock: String,
-    pub battery: Option<u8>,
-    pub charging: bool,
-    pub wifi: bool,
-    pub bluetooth: bool,
-}
-
-impl StatusInfo {
-    pub fn read(bluetooth: bool) -> Self {
-        Self {
-            clock: clock_text(),
-            battery: read_battery(),
-            charging: read_charging(),
-            wifi: read_wifi(),
-            bluetooth,
-        }
-    }
-}
-
-fn read_sysfs(path: &str) -> Option<String> {
-    std::fs::read_to_string(path)
-        .ok()
-        .map(|text| text.trim().to_string())
-}
-
-fn read_battery() -> Option<u8> {
-    [
-        "/sys/class/power_supply/axp2202-battery/capacity",
-        "/sys/class/power_supply/battery/capacity",
-    ]
-    .iter()
-    .find_map(|path| read_sysfs(path)?.parse::<u8>().ok())
-    .filter(|value| *value <= 100)
-}
-
-fn read_charging() -> bool {
-    read_sysfs("/sys/class/power_supply/axp2202-usb/online").as_deref() == Some("1")
-        || read_sysfs("/sys/class/power_supply/ac/online").as_deref() == Some("1")
-}
-
-fn read_wifi() -> bool {
-    if let Some(state) = read_sysfs("/sys/class/net/wlan0/operstate") {
-        return state == "up";
-    }
-    // Older firmware may not expose operstate; the link-quality column is
-    // the next best signal that the radio is associated.
-    std::fs::read_to_string("/proc/net/wireless")
-        .map(|text| {
-            text.lines().skip(2).any(|line| {
-                let mut fields = line.split_whitespace();
-                let Some(name) = fields.next() else {
-                    return false;
-                };
-                if !name.starts_with("wlan") {
-                    return false;
-                }
-                fields
-                    .nth(1)
-                    .and_then(|quality| quality.trim_end_matches('.').parse::<f32>().ok())
-                    .is_some_and(|quality| quality > 0.0)
-            })
-        })
-        .unwrap_or(false)
-}
-
-fn clock_text() -> String {
-    unsafe {
-        let now = libc::time(std::ptr::null_mut());
-        let mut tm: libc::tm = std::mem::zeroed();
-        if libc::localtime_r(&now, &mut tm).is_null() {
-            return "--:--".into();
-        }
-        format!("{:02}:{:02}", tm.tm_hour, tm.tm_min)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Row {
     pub label: String,
     pub trailing: String,
@@ -345,6 +283,10 @@ pub enum View {
 }
 
 /// Draw one frame. A modal or a hold overlay can sit on top of any screen.
+///
+/// Layer order is deliberate: background, then the view, then the blocking
+/// modal, then the disconnect hold. A modal therefore hides the screen beneath
+/// it without the caller having to clear or swap views.
 #[allow(clippy::too_many_arguments)]
 pub fn draw(
     canvas: &mut Canvas,
@@ -492,6 +434,12 @@ fn draw_splash(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, message: &
     );
 }
 
+/// The connected view: who is linked, which identity it sees, and how to
+/// disconnect or wake the panel.
+///
+/// It intentionally has no event list: the pad belongs to the host once the
+/// link is up, and the screen only needs the host, the profile and the
+/// disconnect hint.
 fn draw_controller(
     canvas: &mut Canvas,
     fonts: &mut Fonts,
@@ -520,6 +468,11 @@ fn draw_controller(
     }
 }
 
+/// The pairing screen: what the host should see, and how to change it.
+///
+/// `identity` is the Bluetooth name the adapter advertises, while
+/// `controller_type` is the user-facing profile label. They differ by design:
+/// a host lists the emulated controller name, not the app's profile name.
 fn draw_pairing(
     canvas: &mut Canvas,
     fonts: &mut Fonts,
@@ -624,6 +577,11 @@ fn draw_pairing(
     );
 }
 
+/// The recovery screen shown when Bluetooth cannot be taken over.
+///
+/// The numbered steps are deliberately actionable without a terminal: the app
+/// auto-closes so NextUI can restore its own Bluetooth state, hence the
+/// countdown at the bottom.
 #[allow(clippy::too_many_arguments)]
 fn draw_error(
     canvas: &mut Canvas,
@@ -686,6 +644,11 @@ fn draw_error(
     }
 }
 
+/// Draw the visible rows as one continuous list.
+///
+/// Scrolling is decided by `view_for`, which keeps the selected row in a
+/// five-row window. The renderer only lays out what it is given, so it stays
+/// independent of host counts and cursor movement.
 fn rows_at(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, rows: &[Row], top: i32) {
     let left = s(canvas, 30);
     let width = canvas.width() - left * 2;
@@ -732,6 +695,11 @@ fn rows_at(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, rows: &[Row], 
     }
 }
 
+/// Draw the bottom action bar: one group flush left, one flush right.
+///
+/// Each group is a single pill containing key pills and labels, which is how
+/// NextUI groups related actions. Empty groups are omitted rather than drawn
+/// as blank pills.
 fn footer(
     canvas: &mut Canvas,
     fonts: &mut Fonts,
@@ -780,6 +748,13 @@ fn key_width(canvas: &Canvas, fonts: &mut Fonts, key: &str) -> i32 {
     }
 }
 
+/// Draw one key pill and return its width.
+///
+/// Single-character keys get a fixed square-ish width, while names such as
+/// "Menu" and "Start" are measured from the font. The baseline is computed
+/// from real glyph bounds: the NextUI face and the embedded fallback have
+/// different ascent/descent, so a fixed offset would centre one and not the
+/// other.
 fn draw_key(
     canvas: &mut Canvas,
     fonts: &mut Fonts,
@@ -878,6 +853,12 @@ fn draw_group(
     width
 }
 
+/// Draw a blocking modal over a dimmed screen.
+///
+/// A loading modal owns the screen until the session changes it: it draws no
+/// actions, because the only way out is the connection succeeding or its
+/// timeout expiring. A confirmation modal draws Cancel and Confirm as a pair,
+/// with the destructive action on the right.
 fn draw_modal(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, modal: &Modal, phase: f32) {
     let w = canvas.width();
     let h = canvas.height();
@@ -972,6 +953,10 @@ enum Loading {
 
 /// The single loading indicator, shared by the splash, the connecting popup
 /// and the disconnect hold.
+///
+/// The fill is always `theme.highlight` (NextUI's color1). The track is a
+/// low-contrast mix of background and text rather than a fixed grey, so it
+/// remains visible on both light and dark themes.
 fn loading_bar(
     canvas: &mut Canvas,
     theme: &Theme,
@@ -1017,6 +1002,11 @@ fn loading_bar(
     }
 }
 
+/// Overlay shown while Menu+Start is held to disconnect.
+///
+/// The progression is determinate because the hold has a known duration; the
+/// HID report is already neutral at this point, so the overlay is purely a
+/// visual confirmation that the chord is doing something.
 fn draw_hold(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, progress: f32) {
     let w = canvas.width();
     let h = canvas.height();
@@ -1063,6 +1053,11 @@ fn draw_hold(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, progress: f3
     );
 }
 
+/// Draw the right-aligned status pill: link, Wi-Fi, battery and clock.
+///
+/// Only the indicators that are actually known are drawn. The pill width is
+/// measured first so the header title can be ellipsized against the remaining
+/// space instead of running underneath it.
 #[allow(clippy::too_many_arguments)]
 fn draw_status(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, status: &StatusInfo) {
     let width = status_bar_width(canvas, fonts, status);
@@ -1226,6 +1221,12 @@ fn draw_battery(
     }
 }
 
+/// Scale a layout value from the 1024-wide reference to the actual panel.
+///
+/// Every metric in this file is written against 1024×768, which is the Brick's
+/// native resolution; the helper keeps the same layout usable if a future
+/// model has a different width. Heights are derived from the same factor so
+/// pills stay circular rather than elliptical.
 fn s(canvas: &Canvas, value: i32) -> i32 {
     (value as f32 * canvas.width() as f32 / 1024.0).round() as i32
 }
@@ -1246,6 +1247,11 @@ fn round_rect_mask(w: i32, h: i32, r: i32) -> Vec<u8> {
     mask
 }
 
+/// Fill a rounded rectangle, caching its antialiasing mask by size and radius.
+///
+/// Rasterising the mask on every frame would cost more than the rest of the
+/// drawing on this CPU. The cache is per thread because the renderer owns one
+/// thread and `Canvas` is not shared across threads.
 fn round_rect(canvas: &mut Canvas, x: i32, y: i32, w: i32, h: i32, r: i32, colour: Rgb) {
     thread_local! {
         static MASKS: std::cell::RefCell<HashMap<(i32, i32, i32), Vec<u8>>> = std::cell::RefCell::new(HashMap::new());

@@ -19,14 +19,38 @@
 //!
 //! The descriptor is the Bluetooth one Linux's `hid-sony.c` (v4.9) carried for
 //! this controller.
+//!
+//! This module is the protocol side of the PlayStation profile. Its
+//! feature-report handling is why the session lets a profile intercept
+//! `GET_REPORT` before falling back to the generic HID handler.
 
-use crate::hid::{self, button, State};
-use crate::l2cap::Addr;
+use super::codec::{Codec as CodecTrait, LinkContext, Output, Reports};
+use super::spec::{ProfileSpec, Schedule, UsbId};
+use crate::bluetooth::Address;
+use crate::hid::{self, Control};
+use crate::input::{Button, PadState};
+use std::time::Duration;
 
 pub const VENDOR: u16 = 0x054C;
 pub const PRODUCT: u16 = 0x09CC;
 /// What a real one calls itself.
 pub const NAME: &str = "Wireless Controller";
+
+pub const SPEC: ProfileSpec = ProfileSpec {
+    key: "ps4",
+    label: "PlayStation",
+    bluetooth_name: NAME,
+    usb: Some(UsbId {
+        vendor: VENDOR,
+        product: PRODUCT,
+        version: 0x0100,
+    }),
+    descriptor: DESCRIPTOR,
+    schedule: Schedule::Periodic {
+        every: Duration::from_millis(10),
+    },
+    rumble: true,
+};
 
 pub const DESCRIPTOR: &[u8] = &[
     0x05, 0x01, // Usage Page (Desktop)
@@ -264,7 +288,7 @@ pub struct Stream {
 
 impl Stream {
     /// The interrupt-channel packet: DATA/Input header, then report 0x11.
-    pub fn packet(&mut self, state: &State, elapsed_us: u64) -> [u8; INPUT_LEN + 1] {
+    pub fn packet(&mut self, state: &PadState, elapsed_us: u64) -> [u8; INPUT_LEN + 1] {
         self.counter = self.counter.wrapping_add(1) & 0x3F;
         self.timestamp = self.timestamp.wrapping_add((elapsed_us * 3 / 16) as u16);
         let mut p = [0u8; INPUT_LEN + 1];
@@ -278,7 +302,7 @@ impl Stream {
         r[..4].copy_from_slice(&[lx, ly, rx, ry]);
         r[4] = buttons0(state);
         r[5] = buttons1(state);
-        r[6] = (state.pressed(button::HOME) as u8) | (self.counter << 2);
+        r[6] = (state.pressed(Button::Home) as u8) | (self.counter << 2);
         r[7] = state.triggers[0];
         r[8] = state.triggers[1];
         r[9..11].copy_from_slice(&self.timestamp.to_le_bytes());
@@ -302,21 +326,46 @@ impl Stream {
     }
 }
 
+/// The DualShock 4 encoder. The stream carries the report counter and the
+/// motion clock, which must keep advancing across frames.
+#[derive(Default)]
+pub struct Codec {
+    stream: Stream,
+}
+
+impl CodecTrait for Codec {
+    fn packets(&mut self, state: &PadState, elapsed: Duration) -> Reports {
+        let packet = self.stream.packet(state, elapsed.as_micros() as u64);
+        Reports::one(&packet)
+    }
+
+    fn control(&mut self, message: &[u8], link: &LinkContext, state: &PadState) -> Control {
+        control(message, link.local, link.peer, state)
+    }
+
+    fn output(&mut self, report: &[u8], _link: &LinkContext) -> Output {
+        Output {
+            rumble: rumble(report),
+            disconnect: false,
+        }
+    }
+}
+
 /// Hat in the low nibble; square, cross, circle, triangle above it - by where
 /// they sit, as the generic mode's buttons are. (Mapping by letter instead,
 /// so an iPad's "A" is the handheld's A, was tried and not wanted.)
-fn buttons0(s: &State) -> u8 {
-    let mut b = s.hat & 0x0F;
-    if s.pressed(button::WEST) {
+fn buttons0(s: &PadState) -> u8 {
+    let mut b = s.hat.raw() & 0x0F;
+    if s.pressed(Button::West) {
         b |= 0x10;
     }
-    if s.pressed(button::SOUTH) {
+    if s.pressed(Button::South) {
         b |= 0x20;
     }
-    if s.pressed(button::EAST) {
+    if s.pressed(Button::East) {
         b |= 0x40;
     }
-    if s.pressed(button::NORTH) {
+    if s.pressed(Button::North) {
         b |= 0x80;
     }
     b
@@ -324,16 +373,16 @@ fn buttons0(s: &State) -> u8 {
 
 /// L1 R1 L2 R2 Share Options L3 R3, low bit first. SELECT is Share, START
 /// is Options.
-fn buttons1(s: &State) -> u8 {
+fn buttons1(s: &PadState) -> u8 {
     [
-        button::L1,
-        button::R1,
-        button::L2,
-        button::R2,
-        button::SELECT,
-        button::START,
-        button::L3,
-        button::R3,
+        Button::L1,
+        Button::R1,
+        Button::L2,
+        Button::R2,
+        Button::Select,
+        Button::Start,
+        Button::L3,
+        Button::R3,
     ]
     .iter()
     .enumerate()
@@ -368,7 +417,7 @@ fn calibration(id: u8, len: usize, bluetooth: bool) -> Vec<u8> {
 
 /// A feature report, as the host asked for it by ID - or None for one this
 /// controller does not have.
-pub fn feature(id: u8, own: Addr, host: Addr) -> Option<Vec<u8>> {
+pub fn feature(id: u8, own: Address, host: Address) -> Option<Vec<u8>> {
     let report = match id {
         0x05 => {
             let mut r = calibration(0x05, 41, true);
@@ -431,12 +480,14 @@ pub fn rumble(report: &[u8]) -> Option<u8> {
 
 /// Answer a control-channel message in this mode. GET_REPORT for a feature
 /// is what differs from the generic gamepad; everything else is the same.
-pub fn control(message: &[u8], own: Addr, host: Addr, state: &State) -> hid::Control {
+pub fn control(message: &[u8], own: Address, host: Address, state: &PadState) -> hid::Control {
     let Some(&header) = message.first() else {
         return hid::Control::Ignore;
     };
     if header >> 4 != 0x4 {
-        return hid::control(message, state);
+        // Only GET_REPORT needs the input report; the other transactions are
+        // handled by the generic HID logic.
+        return hid::control(message, &[]);
     }
     let kind = header & 0x03;
     // With bit 3 set, a two-byte limit on the reply follows the ID.
@@ -472,9 +523,10 @@ pub fn control(message: &[u8], own: Addr, host: Addr, state: &State) -> hid::Con
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::input::Hat;
 
-    const OWN: Addr = Addr([0x02, 0x11, 0x22, 0x33, 0x44, 0x55]);
-    const HOST: Addr = Addr([0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC]);
+    const OWN: Address = Address([0x02, 0x11, 0x22, 0x33, 0x44, 0x55]);
+    const HOST: Address = Address([0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC]);
 
     #[test]
     fn rumble_is_read_only_when_the_report_says_the_motors_are_set() {
@@ -502,7 +554,7 @@ mod tests {
 
     #[test]
     fn the_input_report_has_the_size_and_crc_linux_checks() {
-        let p = Stream::default().packet(&State::default(), 0);
+        let p = Stream::default().packet(&PadState::default(), 0);
         assert_eq!(p.len(), 79);
         assert_eq!(&p[..2], &[0xA1, 0x11]);
         let crc = u32::from_le_bytes(p[75..79].try_into().unwrap());
@@ -511,17 +563,15 @@ mod tests {
 
     #[test]
     fn controls_land_where_the_ps4_report_keeps_them() {
-        let mut s = State {
-            sticks: [1, 2, 3, 4],
-            triggers: [200, 100],
-            hat: 2,
-            ..Default::default()
-        };
-        s.set_button(button::SOUTH, true); // cross
-        s.set_button(button::NORTH, true); // triangle
-        s.set_button(button::R1, true);
-        s.set_button(button::START, true); // options
-        s.set_button(button::HOME, true); // PS
+        let mut s = PadState::default();
+        s.sticks = [1, 2, 3, 4];
+        s.triggers = [200, 100];
+        s.hat = Hat::Right;
+        s.set_button(Button::South, true); // cross
+        s.set_button(Button::North, true); // triangle
+        s.set_button(Button::R1, true);
+        s.set_button(Button::Start, true); // options
+        s.set_button(Button::Home, true); // PS
         let p = Stream::default().packet(&s, 0);
         let r = &p[4..];
         assert_eq!(&r[..4], &[1, 2, 3, 4]);
@@ -533,28 +583,28 @@ mod tests {
 
     #[test]
     fn face_buttons_go_by_position() {
-        let face = |n: u8| {
-            let mut s = State::default();
+        let face = |n: Button| {
+            let mut s = PadState::default();
             s.set_button(n, true);
             buttons0(&s) & 0xF0
         };
-        assert_eq!(face(button::SOUTH), 0x20, "bottom is cross");
-        assert_eq!(face(button::EAST), 0x40, "right is circle");
-        assert_eq!(face(button::WEST), 0x10, "left is square");
-        assert_eq!(face(button::NORTH), 0x80, "top is triangle");
+        assert_eq!(face(Button::South), 0x20, "bottom is cross");
+        assert_eq!(face(Button::East), 0x40, "right is circle");
+        assert_eq!(face(Button::West), 0x10, "left is square");
+        assert_eq!(face(Button::North), 0x80, "top is triangle");
     }
 
     #[test]
     fn a_resting_pad_reports_a_centred_hat() {
-        let p = Stream::default().packet(&State::default(), 0);
+        let p = Stream::default().packet(&PadState::default(), 0);
         assert_eq!(p[8] & 0x0F, 8);
     }
 
     #[test]
     fn the_counter_and_clock_advance_with_each_report() {
         let mut s = Stream::default();
-        let a = s.packet(&State::default(), 0);
-        let b = s.packet(&State::default(), 1600);
+        let a = s.packet(&PadState::default(), 0);
+        let b = s.packet(&PadState::default(), 1600);
         assert_eq!((b[10] >> 2), (a[10] >> 2) + 1);
         assert_eq!(
             u16::from_le_bytes([b[13], b[14]]) - u16::from_le_bytes([a[13], a[14]]),
@@ -590,7 +640,7 @@ mod tests {
 
     #[test]
     fn get_report_is_answered_with_a_data_header_and_the_limit_honoured() {
-        let s = State::default();
+        let s = PadState::default();
         // GET_REPORT | size follows | feature, ID 5, limit 41.
         let hid::Control::Reply(r) = control(&[0x4B, 0x05, 41, 0], OWN, HOST, &s) else {
             panic!()
@@ -614,30 +664,8 @@ mod tests {
 
     #[test]
     fn the_descriptor_declares_report_0x11_at_the_size_sent() {
-        // Bits declared under Report ID 0x11 for Input items.
-        let (mut size, mut count, mut id, mut bits) = (0u32, 0u32, 0u8, 0u32);
-        let mut i = 0;
-        while i < DESCRIPTOR.len() {
-            let prefix = DESCRIPTOR[i];
-            let len = match prefix & 0x03 {
-                3 => 4,
-                n => n as usize,
-            };
-            let value = DESCRIPTOR[i + 1..i + 1 + len]
-                .iter()
-                .rev()
-                .fold(0u32, |v, b| v << 8 | *b as u32);
-            match prefix & 0xFC {
-                0x74 => size = value,
-                0x94 => count = value,
-                0x84 => id = value as u8,
-                0x80 if id == 0x11 => bits += size * count,
-                _ => {}
-            }
-            i += 1 + len;
-        }
         assert_eq!(
-            bits / 8,
+            crate::test_support::input_bits(DESCRIPTOR, Some(0x11)) / 8,
             (INPUT_LEN - 1) as u32,
             "report bytes after the ID"
         );
