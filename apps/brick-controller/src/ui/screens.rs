@@ -3,7 +3,7 @@
 
 //! Screen composition: the render model and the drawing order for each screen.
 
-use super::theme::{hint_text, outer_style, PillStyle, Theme};
+use super::theme::{hint_text, outer_style, Theme};
 use super::widgets::{
     draw_hold, draw_key, draw_modal, draw_status, footer, item, key_width, loading_bar, rows_at,
     status_bar_width, Loading, Modal, Row,
@@ -113,6 +113,7 @@ pub fn draw(
                 identity,
                 controller_type,
                 reconnecting.as_deref(),
+                phase,
             );
             footer(
                 canvas,
@@ -241,27 +242,28 @@ fn draw_pairing(
     identity: &str,
     controller_type: &str,
     reconnecting: Option<&str>,
+    phase: f32,
 ) {
     let centre = canvas.width() / 2;
-    let max_w = canvas.width() - s(canvas, 120);
-    let lines = fonts.wrap(
-        "Open Bluetooth settings on your device and select this controller.",
-        ITEM_SIZE,
-        max_w,
-        3,
-    );
-    let line_step = s(canvas, 56);
-    let wait_w = s(canvas, 520);
-    let wait_h = s(canvas, 72);
+    let bar_w = s(canvas, 520);
+    let bar_h = s(canvas, 18);
+    let hint_line = s(canvas, HINT_SIZE as i32);
+    let block_gap = s(canvas, 64);
+    let reconnect_h = if reconnecting.is_some() {
+        s(canvas, 44)
+    } else {
+        0
+    };
 
-    // Centre the whole block between the status bar and the footer so the
-    // heading and the waiting pill keep the same breathing room. The last
-    // baseline is 24 px below the visual top of the first line.
+    // Centre the block between the header and the footer. The identity is the
+    // only large, main-colour line; the type and waiting labels share the same
+    // hint size and colour. The waiting block starts 64 px below the type
+    // label's line box, and the bar follows the waiting label.
     let header_bottom = s(canvas, 105);
     let footer_top = canvas.height() - s(canvas, 30) - s(canvas, 90);
-    let text_to_wait = s(canvas, 80);
-    let block_h =
-        s(canvas, 194) + lines.len().saturating_sub(1) as i32 * line_step + text_to_wait + wait_h;
+    let type_baseline = s(canvas, 130);
+    let lower_top = type_baseline + hint_line + block_gap;
+    let block_h = lower_top + reconnect_h + s(canvas, 20) + bar_h;
     let start = (header_bottom + footer_top) / 2 - block_h / 2 + s(canvas, 12);
 
     fonts.draw_centred(
@@ -284,57 +286,39 @@ fn draw_pairing(
         canvas,
         &format!("{controller_type} controller"),
         centre,
-        start + s(canvas, 130),
+        start + type_baseline,
         HINT_SIZE,
         hint_text(theme),
     );
 
-    let first_line = start + s(canvas, 194);
-    for (i, line) in lines.iter().enumerate() {
-        fonts.draw_centred(
-            canvas,
-            line,
-            centre,
-            first_line + i as i32 * line_step,
-            ITEM_SIZE,
-            theme.text,
-        );
-    }
-
-    let wait_y = first_line + lines.len().saturating_sub(1) as i32 * line_step + text_to_wait;
+    let lower_y = start + lower_top;
     if let Some(host) = reconnecting {
         fonts.draw_centred(
             canvas,
             &format!("Reconnecting to {host}…"),
             centre,
-            wait_y - s(canvas, 26),
+            lower_y,
             SMALL_SIZE,
             hint_text(theme),
         );
     }
-
-    // Main-colour pill with background-coloured text, like the selected rows.
-    let waiting = PillStyle {
-        fill: theme.highlight,
-        text: theme.background,
-    };
-    let wait_x = centre - wait_w / 2;
-    round_rect(
-        canvas,
-        wait_x,
-        wait_y,
-        wait_w,
-        wait_h,
-        wait_h / 2,
-        waiting.fill,
-    );
+    let wait_y = lower_y + reconnect_h;
     fonts.draw_centred(
         canvas,
         "Waiting for a host…",
         centre,
-        wait_y + wait_h / 2 + s(canvas, 12),
-        SMALL_SIZE,
-        waiting.text,
+        wait_y,
+        HINT_SIZE,
+        hint_text(theme),
+    );
+    loading_bar(
+        canvas,
+        theme,
+        centre - bar_w / 2,
+        wait_y + s(canvas, 20),
+        bar_w,
+        bar_h,
+        Loading::Indeterminate(phase),
     );
 }
 

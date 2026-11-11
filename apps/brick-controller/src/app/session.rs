@@ -12,6 +12,7 @@ use super::settings::{remember_profile, save_host, save_mode, save_profiles, Set
 use super::view_model::{
     modal_view, move_cursor, nav_dir, view_for, Dir, MenuRow, ModalState, Screen,
 };
+use super::StartScreen;
 use crate::bluetooth::{
     bluez,
     l2cap::{Channel, Listener},
@@ -130,6 +131,8 @@ pub(crate) enum SessionOutcome {
     SwitchProfile {
         profile: Profile,
         connect: Option<Address>,
+        /// Reopen Pairing after the Bluetooth restart, instead of Devices.
+        pairing: bool,
     },
     Retry,
 }
@@ -216,15 +219,29 @@ fn open_devices(
 ///   torn down.
 pub(crate) fn session(
     profile: Profile,
-    start_in_settings: bool,
+    start: StartScreen,
     connect: Option<Address>,
     screen: &Renderer,
     pad: &mut Pad,
 ) -> Result<SessionOutcome, String> {
-    if !start_in_settings {
+    if start == StartScreen::Splash {
         screen.show(Frame {
             view: View::Splash {
                 message: "Starting Bluetooth…".into(),
+            },
+            status: StatusInfo::read(false),
+            modal: None,
+            hold: None,
+        });
+    } else if start == StartScreen::Pairing {
+        // The previous session may have left the Profile list on screen while
+        // the daemon restarts. Show the new identity's Pairing screen at once,
+        // then let the loop replace it with the live status frame.
+        screen.show(Frame {
+            view: View::Pairing {
+                identity: profile.bt_name().into(),
+                controller_type: profile.label(),
+                reconnecting: None,
             },
             status: StatusInfo::read(false),
             modal: None,
@@ -289,14 +306,18 @@ pub(crate) fn session(
     let mut combo_seen = false;
     let mut settings = Settings::load(&bus, profile);
     let mut controller = Controller::new(profile);
-    let mut state = Screen::Menu { cursor: 0 };
+    let mut state = match start {
+        StartScreen::Pairing => Screen::Pairing { back: true },
+        _ => Screen::Menu { cursor: 0 },
+    };
     let mut modal = connect.map(ModalState::Connecting);
     let mut connect_deadline = connect.map(|_| Instant::now() + CONNECT_TIMEOUT);
-    // The profile to switch to. A switch always comes from the menu, so the
-    // new session reopens it. The host is reconnected only when the switch was
-    // part of an explicit Connect.
+    // The profile to switch to. A type chosen from Pairing reopens Pairing; a
+    // Connect that needs another identity reopens Devices and then reconnects
+    // to the host.
     let mut switch_to: Option<Profile> = None;
     let mut switch_connect: Option<Address> = None;
+    let mut switch_pairing = false;
     let mut drawn: Option<DrawKey> = None;
     let mut backlight = display::Backlight::open();
     // A dark panel is woken by Menu+Start; `wake_used` keeps the same held
@@ -788,6 +809,7 @@ pub(crate) fn session(
                                     settings.pairing = choice;
                                     save_mode(choice);
                                     switch_to = Some(choice);
+                                    switch_pairing = true;
                                 } else {
                                     state = Screen::Pairing { back: true };
                                 }
@@ -849,6 +871,7 @@ pub(crate) fn session(
             break 'session SessionOutcome::SwitchProfile {
                 profile: next,
                 connect: switch_connect,
+                pairing: switch_pairing,
             };
         }
 

@@ -122,8 +122,10 @@ The identity is chosen when pairing a new host:
   rumble from the host.
 
 Open **Pair a new device**, press **X** to choose the controller type, then pair
-from the host. Each host keeps the identity it first paired with, and the Brick
-uses it again when that host is connected.
+from the host. Choosing another type restarts the Bluetooth session with the
+new identity and returns to the **Pairing** screen, ready for the host to pair.
+Each host keeps the identity it first paired with, and the Brick uses it again
+when that host is connected.
 
 The controller type of an already paired host is not editable from Devices. To
 change it, forget the host on both sides, choose the other type in the pairing

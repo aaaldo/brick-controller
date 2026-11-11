@@ -523,8 +523,12 @@ Règles :
 - Le choix du type de contrôleur se fait uniquement lors de l'appairage : dans
   l'écran Pairing, X ouvre la liste des profils pour le prochain appairage.
   Choisir un autre type redémarre la session Bluetooth avec la nouvelle
-  identité et réaffiche Devices. Aucun changement de type n'est proposé pour un
-  hôte déjà appairé.
+  identité et réaffiche **Pairing**, pour permettre l'appairage immédiat. Aucun
+  changement de type n'est proposé pour un hôte déjà appairé.
+- L'écran Pairing affiche l'identité, le type de contrôleur et le libellé
+  « Waiting for a host… » au même format de texte, suivi d'une barre de
+  chargement horizontale indéterminée en color1. Il ne contient plus de
+  consigne d'appairage séparée.
 - **Pair a new device** reste disponible même avec un hôte connecté ; il ouvre
   l'écran d'appairage, où X permet de changer l'identité du prochain appairage.
 - À la connexion d'un hôte, la vue controller est titrée **Connected** et
@@ -594,8 +598,10 @@ reconstruire avant le test.
 - aucune fuite de D-pad/A/B/Menu/Start/Select vers l'hôte dans l'interface ;
 - extinction après 10 s, rallumage par appui Menu+Start et nouveau cycle de 10 s ;
 - vue controller : titre « Connected », hôte et profil, sans liste d'évènements ;
-- choix du profil lors d'un nouvel appairage, redémarrage de session et
-  réappairage ;
+- choix du profil lors d'un nouvel appairage, redémarrage de session, retour
+  automatique à Pairing et réappairage ;
+- écran Pairing : identité, type de contrôleur et libellé d'attente au même
+  format, barre indéterminée color1, sans consigne séparée ;
 - vibrations en mode Xbox : rapport 0x03 sur le canal interrupt et SET_REPORT,
   moteur arrêté à la déconnexion et à la sortie ;
 - profils PlayStation et Switch : appairage, boutons, sticks centrés, rumble
