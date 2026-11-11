@@ -11,6 +11,13 @@ use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 const AF_BLUETOOTH: libc::c_int = 31;
 const BTPROTO_L2CAP: libc::c_int = 0;
 
+/// The kernel's `sockaddr_l2`, declared here because libc has no Bluetooth
+/// types.
+///
+/// `psm` and the address are little-endian on the wire. `Address` stores the
+/// printed order, so every crossing of this boundary goes through
+/// `to_wire`/`from_wire`; mixing the two orders is the classic Bluetooth
+/// socket bug.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 struct SockaddrL2 {
@@ -22,38 +29,7 @@ struct SockaddrL2 {
     bdaddr_type: u8,
 }
 
-/// A Bluetooth device address, stored as printed (most significant first).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Addr(pub [u8; 6]);
-
-impl Addr {
-    pub fn parse(text: &str) -> Option<Self> {
-        let parts: Vec<u8> = text
-            .trim()
-            .split(':')
-            .map(|p| u8::from_str_radix(p, 16).ok())
-            .collect::<Option<_>>()?;
-        Some(Self(parts.try_into().ok()?))
-    }
-
-    fn to_wire(self) -> [u8; 6] {
-        let mut b = self.0;
-        b.reverse();
-        b
-    }
-
-    fn from_wire(mut b: [u8; 6]) -> Self {
-        b.reverse();
-        Self(b)
-    }
-}
-
-impl std::fmt::Display for Addr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let [a, b, c, d, e, g] = self.0;
-        write!(f, "{a:02X}:{b:02X}:{c:02X}:{d:02X}:{e:02X}:{g:02X}")
-    }
-}
+use super::address::Address;
 
 #[cfg(target_os = "linux")]
 const SOCK_CLOEXEC: libc::c_int = libc::SOCK_CLOEXEC;
@@ -109,6 +85,10 @@ const ADDR_LEN: libc::socklen_t = std::mem::size_of::<SockaddrL2>() as _;
 pub struct Listener(OwnedFd);
 
 impl Listener {
+    /// Bind a local HID PSM on every local Bluetooth address.
+    ///
+    /// The backlog is one: a gamepad has a single host, and extra queued
+    /// connections would only let a stale peer race the current one.
     pub fn bind(psm: u16) -> io::Result<Self> {
         let fd = socket()?;
         let a = addr(psm, [0; 6]);
@@ -129,7 +109,11 @@ impl Listener {
     }
 
     /// Take a waiting connection, or None if there is none yet.
-    pub fn accept(&self) -> io::Result<Option<(Channel, Addr)>> {
+    ///
+    /// The caller pairs the control and interrupt channels by address: a host
+    /// opens control first, then interrupt. Accepting them independently here
+    /// keeps a half-open pairing from blocking the poll loop.
+    pub fn accept(&self) -> io::Result<Option<(Channel, Address)>> {
         let mut a = SockaddrL2::default();
         let mut len = ADDR_LEN;
         let fd = accept_cloexec(
@@ -146,7 +130,7 @@ impl Listener {
             };
         }
         let channel = Channel(unsafe { OwnedFd::from_raw_fd(fd) });
-        Ok(Some((channel, Addr::from_wire(a.bdaddr))))
+        Ok(Some((channel, Address::from_wire(a.bdaddr))))
     }
 
     pub fn set_nonblocking(&self) -> io::Result<()> {
@@ -167,7 +151,7 @@ impl Channel {
     /// Connect out to a host, blocking until the link is up or refused. Used to
     /// reconnect to the host already paired with, which is the device's job
     /// in the HID profile.
-    pub fn connect(to: Addr, psm: u16) -> io::Result<Self> {
+    pub fn connect(to: Address, psm: u16) -> io::Result<Self> {
         let fd = socket()?;
         let a = addr(psm, to.to_wire());
         if unsafe {
@@ -281,11 +265,11 @@ mod tests {
 
     #[test]
     fn addresses_print_as_written_and_go_out_reversed() {
-        let a = Addr::parse("12:34:56:78:9A:BC").unwrap();
+        let a = Address::parse("12:34:56:78:9A:BC").unwrap();
         assert_eq!(a.to_string(), "12:34:56:78:9A:BC");
         assert_eq!(a.to_wire(), [0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12]);
-        assert_eq!(Addr::from_wire(a.to_wire()), a);
-        assert_eq!(Addr::parse("nonsense"), None);
-        assert_eq!(Addr::parse("12:34:56:78:9A"), None);
+        assert_eq!(Address::from_wire(a.to_wire()), a);
+        assert_eq!(Address::parse("nonsense"), None);
+        assert_eq!(Address::parse("12:34:56:78:9A"), None);
     }
 }

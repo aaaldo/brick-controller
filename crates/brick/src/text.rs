@@ -24,6 +24,12 @@ pub struct Fonts {
 }
 
 impl Fonts {
+    /// Load the first usable theme face, then append the embedded fallback.
+    ///
+    /// Only one external face is kept: the theme font already merges Latin and
+    /// CJK, and trying several system fonts would make glyph selection depend
+    /// on the device. If the file is missing or unreadable, the embedded
+    /// subset still covers the interface's Latin labels.
     pub fn load(paths: &[String]) -> Self {
         let mut faces = Vec::new();
         for path in paths {
@@ -49,6 +55,12 @@ impl Fonts {
         }
     }
 
+    /// Rasterise a glyph once per (character, size) and cache the coverage.
+    ///
+    /// The size is keyed by its bit pattern rather than a rounded integer:
+    /// the UI uses a handful of fixed sizes, and exact bits avoid collisions
+    /// between values that would round to the same pixel size but rasterise
+    /// differently.
     fn glyph(&mut self, ch: char, size: f32) -> &Glyph {
         let faces = &self.faces;
         self.cache.entry((ch, size.to_bits())).or_insert_with(|| {
@@ -69,6 +81,10 @@ impl Fonts {
     }
 
     /// Draw `text` with its baseline at `baseline_y`; returns the x just past it.
+    ///
+    /// Glyph positioning uses fontdue's `ymin`/`height`, which are relative to
+    /// the baseline. That is why callers pass a baseline and not a top-left
+    /// corner; `centred_baseline` is the helper for vertically centred labels.
     pub fn draw(
         &mut self,
         canvas: &mut Canvas,

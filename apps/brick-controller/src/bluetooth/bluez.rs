@@ -44,6 +44,12 @@ fn daemon_running() -> bool {
         .is_ok_and(|s| s.success())
 }
 
+/// Stop everything that could own the HID PSMs before starting our daemon.
+///
+/// `bt_init.sh stop` is deliberately not used on tg5040: it also tears down
+/// `hciattach`, and bringing the adapter back takes far longer than restarting
+/// the daemon. Waiting for `bluetoothd` to disappear avoids a race where our
+/// daemon starts while the old one still holds the profile.
 fn stop_all_daemons() {
     let _ = Command::new(SYSTEM_INIT)
         .arg("stop")
@@ -114,6 +120,9 @@ impl Daemon {
                     .into(),
             );
         }
+        // The marker is written before anything is stopped: a crash between
+        // these lines must still tell `launch.sh` whether the system daemon was
+        // running when the app took over.
         let was_running = daemon_running();
         std::fs::write(MARKER, if was_running { "1" } else { "0" }).map_err(|e| e.to_string())?;
         stop_all_daemons();
@@ -148,6 +157,8 @@ impl Daemon {
 
 impl Drop for Daemon {
     fn drop(&mut self) {
+        // `wait` before restoring: starting the system daemon while our child
+        // still holds the adapter makes the new one miss `hci0`.
         let _ = self.child.kill();
         let _ = self.child.wait();
         restore_system_daemon();
@@ -202,7 +213,7 @@ impl Profile {
 /// peripherals are filtered out; only computers, phones and tablets are kept.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Host {
-    pub addr: crate::l2cap::Addr,
+    pub addr: crate::bluetooth::Address,
     pub name: String,
     pub connected: bool,
 }
@@ -259,7 +270,7 @@ impl Bus {
             "/org/bluez",
             "org.bluez.ProfileManager1",
             "RegisterProfile",
-            &(&profile, crate::sdp::HID_UUID, options),
+            &(&profile, crate::bluetooth::sdp::HID_UUID, options),
         )?;
         Ok(bus)
     }
@@ -348,8 +359,8 @@ impl Bus {
             if !is_host {
                 continue;
             }
-            let Some(addr) =
-                text(device, "Address").and_then(|address| crate::l2cap::Addr::parse(&address))
+            let Some(addr) = text(device, "Address")
+                .and_then(|address| crate::bluetooth::Address::parse(&address))
             else {
                 continue;
             };
@@ -367,7 +378,7 @@ impl Bus {
     }
 
     /// Ask BlueZ to drop the link to a host. Pairing is kept.
-    pub fn disconnect(&self, addr: crate::l2cap::Addr) -> Result<(), String> {
+    pub fn disconnect(&self, addr: crate::bluetooth::Address) -> Result<(), String> {
         self.call(
             &Self::device_path(addr),
             "org.bluez.Device1",
@@ -376,12 +387,12 @@ impl Bus {
         )
     }
 
-    fn device_path(addr: crate::l2cap::Addr) -> String {
+    fn device_path(addr: crate::bluetooth::Address) -> String {
         format!("/org/bluez/hci0/dev_{}", addr.to_string().replace(':', "_"))
     }
 
     /// Mark a host trusted, so it can reconnect without being asked again.
-    pub fn trust(&self, addr: crate::l2cap::Addr) {
+    pub fn trust(&self, addr: crate::bluetooth::Address) {
         let _ = self.call(
             &Self::device_path(addr),
             "org.freedesktop.DBus.Properties",
@@ -390,10 +401,11 @@ impl Bus {
         );
     }
 
-    /// The adapter's own address. Kept for a future profile that needs it;
-    /// the PC profile does not.
-    #[allow(dead_code)]
-    pub fn address(&self) -> Option<crate::l2cap::Addr> {
+    /// The adapter's own address.
+    ///
+    /// The DualShock 4 pairing report and the Switch device-info reply both
+    /// include it; the PC and Xbox profiles do not need it.
+    pub fn address(&self) -> Option<crate::bluetooth::Address> {
         let reply = self
             .conn
             .call_method(
@@ -405,11 +417,11 @@ impl Bus {
             )
             .ok()?;
         let value: zbus::zvariant::OwnedValue = reply.body().deserialize().ok()?;
-        crate::l2cap::Addr::parse(&String::try_from(value).ok()?)
+        crate::bluetooth::Address::parse(&String::try_from(value).ok()?)
     }
 
     /// The host's own name, as it announced itself.
-    pub fn name_of(&self, addr: crate::l2cap::Addr) -> Option<String> {
+    pub fn name_of(&self, addr: crate::bluetooth::Address) -> Option<String> {
         let reply = self
             .conn
             .call_method(
@@ -426,7 +438,7 @@ impl Bus {
 
     /// Forget a host that unplugged us, so it can pair afresh. Returns false
     /// when BlueZ could not remove it.
-    pub fn remove(&self, addr: crate::l2cap::Addr) -> bool {
+    pub fn remove(&self, addr: crate::bluetooth::Address) -> bool {
         let Ok(path) = ObjectPath::try_from(Self::device_path(addr)) else {
             return false;
         };

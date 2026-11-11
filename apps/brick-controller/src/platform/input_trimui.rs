@@ -11,8 +11,12 @@
 //!
 //! The same file lists the right stick's axes crossed (ABS_RY as X), but on
 //! the device they are not: tested on a PC, pushing right moved ABS_RX.
+//!
+//! This is the platform input reader, not a controller profile. The pure pad
+//! state it fills lives in `input.rs`; profiles translate that state into
+//! their own reports.
 
-use crate::hid::{self, button, State};
+use crate::input::{scale, Button, Hat, PadState};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read};
 use std::os::unix::fs::OpenOptionsExt;
@@ -24,6 +28,10 @@ const EV_ABS: u16 = 3;
 
 const BTN_SOUTH: u16 = 304;
 /// The Brick's front function keys, later mapped to L3 and R3.
+///
+/// `BTN_THUMBR` is the last code in the contiguous gamepad range, so the
+/// mapper uses `BTN_SOUTH..=BTN_THUMBR` to recognise every button without
+/// listing each one; the two exceptions are handled by name below.
 const BTN_THUMBR: u16 = 318;
 /// The handheld's X (top) and Y (left) buttons.
 const KEY_X: u16 = 308;
@@ -39,6 +47,10 @@ const ABS_HAT0X: u16 = 16;
 const ABS_HAT0Y: u16 = 17;
 
 /// A trigger counts as a button press past this share of its travel.
+///
+/// The host gets both the analogue axis and a digital L2/R2 bit, because some
+/// games only read the button. A quarter of the travel is early enough to feel
+/// immediate without making a light resting touch register.
 const TRIGGER_BUTTON_AT: u8 = 64;
 
 #[repr(C)]
@@ -78,7 +90,7 @@ pub use brick::input::pad_path;
 /// mapping can be tested without a device.
 #[derive(Clone)]
 pub struct Mapper {
-    pub state: State,
+    pub state: PadState,
     /// Set when Menu and Start were down together, even if both were released
     /// before the next poll. Cleared by `take_combo_tap`.
     combo_tap: bool,
@@ -90,7 +102,7 @@ pub struct Mapper {
 impl Default for Mapper {
     fn default() -> Self {
         Self {
-            state: State::default(),
+            state: PadState::default(),
             combo_tap: false,
             ranges: [
                 (-32768, 32767),
@@ -120,24 +132,40 @@ impl Mapper {
 
     /// Apply one event. True when it completes a frame (SYN_REPORT), which is
     /// when a report should go out.
+    ///
+    /// The mapper deliberately works on the whole state instead of emitting
+    /// press/release events: the HID report always carries every button and
+    /// axis, so intermediate events never need to reach the host.
     fn apply(&mut self, kind: u16, code: u16, value: i32) -> bool {
         match kind {
             EV_SYN => return code == 0,
             EV_KEY if (BTN_SOUTH..=BTN_THUMBR).contains(&code) && value != 2 => {
-                let number = match code {
-                    KEY_X => button::NORTH,
-                    KEY_Y => button::WEST,
-                    _ => (code - BTN_SOUTH + 1) as u8,
+                // Most Brick keys follow Linux's positional numbering, but X
+                // (top) and Y (left) are reported by letter instead. Mapping
+                // by position keeps the host's face buttons where the player
+                // expects them, whatever is printed on the shell.
+                let button = if code == KEY_X {
+                    Button::North
+                } else if code == KEY_Y {
+                    Button::West
+                } else {
+                    let Some(button) = Button::from_number((code - BTN_SOUTH + 1) as u8) else {
+                        return false;
+                    };
+                    button
                 };
-                self.state.set_button(number, value != 0);
-                if self.state.pressed(button::HOME) && self.state.pressed(button::START) {
+                self.state.set_button(button, value != 0);
+                // Menu alone is Home; Menu+Start is the disconnect/wake
+                // chord. The tap is remembered even if both are released
+                // before the next poll, so a quick tap is not lost.
+                if self.state.pressed(Button::Home) && self.state.pressed(Button::Start) {
                     self.combo_tap = true;
                 }
             }
             EV_ABS => {
                 let scaled = |i: usize| {
                     let (min, max) = self.ranges[i];
-                    hid::scale(value, min, max)
+                    scale(value, min, max)
                 };
                 match code {
                     ABS_X => self.state.sticks[0] = scaled(0),
@@ -147,18 +175,18 @@ impl Mapper {
                     ABS_Z => {
                         let v = scaled(2);
                         self.state.triggers[0] = v;
-                        self.state.set_button(button::L2, v >= TRIGGER_BUTTON_AT);
+                        self.state.set_button(Button::L2, v >= TRIGGER_BUTTON_AT);
                     }
                     ABS_RZ => {
                         let v = scaled(5);
                         self.state.triggers[1] = v;
-                        self.state.set_button(button::R2, v >= TRIGGER_BUTTON_AT);
+                        self.state.set_button(Button::R2, v >= TRIGGER_BUTTON_AT);
                     }
                     ABS_HAT0X => self.hat.0 = value,
                     ABS_HAT0Y => self.hat.1 = value,
                     _ => {}
                 }
-                self.state.hat = hid::hat(self.hat.0, self.hat.1);
+                self.state.hat = Hat::from_axes(self.hat.0, self.hat.1);
             }
             _ => {}
         }
@@ -166,6 +194,11 @@ impl Mapper {
     }
 }
 
+/// The evdev reader and its current mapped state.
+///
+/// `mapper` is public because the session reads the state to build a report;
+/// a future refinement is a `PadState` accessor plus a small event type, so
+/// callers cannot mutate the mapper by accident.
 pub struct Pad {
     file: File,
     pub mapper: Mapper,
@@ -220,6 +253,11 @@ impl Pad {
 
     /// Read whatever is waiting. True if a frame completed and the state may
     /// have changed. Call only after poll() says the node is readable.
+    ///
+    /// The read is batched: one `read` can return several `input_event`
+    /// records, and only the final SYN_REPORT means the state is consistent
+    /// enough to send. The first unknown (type, code) pair is logged so a new
+    /// firmware revision can be adapted from the log.
     pub fn read(&mut self) -> io::Result<bool> {
         let mut buf = [0u8; EVENT_SIZE * 16];
         let n = match self.file.read(&mut buf) {
@@ -273,10 +311,10 @@ mod tests {
             &mut m,
             &[(EV_KEY, 304, 1), (EV_KEY, 316, 1), (EV_SYN, 0, 0)]
         ));
-        assert!(m.state.pressed(button::SOUTH));
-        assert!(m.state.pressed(button::HOME));
+        assert!(m.state.pressed(Button::South));
+        assert!(m.state.pressed(Button::Home));
         feed(&mut m, &[(EV_KEY, 304, 0)]);
-        assert!(!m.state.pressed(button::SOUTH));
+        assert!(!m.state.pressed(Button::South));
     }
 
     #[test]
@@ -296,10 +334,10 @@ mod tests {
     fn x_and_y_go_by_where_they_sit_not_by_their_codes() {
         let mut m = Mapper::default();
         feed(&mut m, &[(EV_KEY, KEY_X, 1)]);
-        assert!(m.state.pressed(button::NORTH), "X is the top button");
-        assert!(!m.state.pressed(button::WEST));
+        assert!(m.state.pressed(Button::North), "X is the top button");
+        assert!(!m.state.pressed(Button::West));
         feed(&mut m, &[(EV_KEY, KEY_X, 0), (EV_KEY, KEY_Y, 1)]);
-        assert!(m.state.pressed(button::WEST), "Y is the left one");
+        assert!(m.state.pressed(Button::West), "Y is the left one");
     }
 
     #[test]
@@ -314,37 +352,37 @@ mod tests {
     fn autorepeat_does_not_change_anything() {
         let mut m = Mapper::default();
         feed(&mut m, &[(EV_KEY, 305, 1), (EV_KEY, 305, 2)]);
-        assert!(m.state.pressed(button::EAST));
+        assert!(m.state.pressed(Button::East));
     }
 
     #[test]
     fn keys_outside_the_gamepad_range_are_ignored() {
         let mut m = Mapper::default();
         feed(&mut m, &[(EV_KEY, 115, 1), (EV_KEY, 61, 1)]);
-        assert_eq!(m.state, State::default());
+        assert_eq!(m.state, PadState::default());
     }
 
     #[test]
     fn front_function_keys_map_to_l3_and_r3() {
         let mut m = Mapper::default();
         feed(&mut m, &[(EV_KEY, 317, 1)]);
-        assert!(m.state.pressed(button::L3));
+        assert!(m.state.pressed(Button::L3));
         feed(&mut m, &[(EV_KEY, 317, 0), (EV_KEY, 318, 1)]);
-        assert!(!m.state.pressed(button::L3));
-        assert!(m.state.pressed(button::R3));
+        assert!(!m.state.pressed(Button::L3));
+        assert!(m.state.pressed(Button::R3));
         feed(&mut m, &[(EV_KEY, 318, 0)]);
-        assert!(!m.state.pressed(button::R3));
+        assert!(!m.state.pressed(Button::R3));
     }
 
     #[test]
     fn the_dpad_hat_follows_both_axes() {
         let mut m = Mapper::default();
         feed(&mut m, &[(EV_ABS, ABS_HAT0Y, -1)]);
-        assert_eq!(m.state.hat, 0);
+        assert_eq!(m.state.hat, Hat::Up);
         feed(&mut m, &[(EV_ABS, ABS_HAT0X, 1)]);
-        assert_eq!(m.state.hat, 1, "up-right");
+        assert_eq!(m.state.hat, Hat::UpRight, "up-right");
         feed(&mut m, &[(EV_ABS, ABS_HAT0Y, 0), (EV_ABS, ABS_HAT0X, 0)]);
-        assert_eq!(m.state.hat, hid::HAT_CENTRED);
+        assert_eq!(m.state.hat, Hat::Centred);
     }
 
     #[test]
@@ -352,10 +390,10 @@ mod tests {
         let mut m = Mapper::default();
         feed(&mut m, &[(EV_ABS, ABS_Z, 255)]);
         assert_eq!(m.state.triggers[0], 255);
-        assert!(m.state.pressed(button::L2));
+        assert!(m.state.pressed(Button::L2));
         feed(&mut m, &[(EV_ABS, ABS_Z, 0), (EV_ABS, ABS_RZ, 30)]);
-        assert!(!m.state.pressed(button::L2));
-        assert!(!m.state.pressed(button::R2), "a light touch is not a press");
+        assert!(!m.state.pressed(Button::L2));
+        assert!(!m.state.pressed(Button::R2), "a light touch is not a press");
     }
 
     #[test]

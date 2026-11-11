@@ -17,7 +17,11 @@
 //! - 0x02: the Xbox button, alone.
 //! - 0x03 (from the host): rumble, four magnitudes of 0-100.
 
-use crate::hid::{button, State, HAT_CENTRED};
+use super::codec::{Codec as CodecTrait, LinkContext, Output, Reports};
+use super::spec::{ProfileSpec, Schedule, UsbId};
+use crate::hid::{self, Control};
+use crate::input::{Button, Hat, PadState};
+use std::time::Duration;
 
 pub const VENDOR: u16 = 0x045E;
 pub const PRODUCT: u16 = 0x02FD;
@@ -46,8 +50,24 @@ pub const DESCRIPTOR: &[u8] = &[
     0x02, 0xC0,
 ];
 
+pub const SPEC: ProfileSpec = ProfileSpec {
+    key: "xbox",
+    label: "Xbox",
+    bluetooth_name: NAME,
+    usb: Some(UsbId {
+        vendor: VENDOR,
+        product: PRODUCT,
+        version: 0x0408,
+    }),
+    descriptor: DESCRIPTOR,
+    schedule: Schedule::OnChange {
+        min_gap: Duration::from_millis(10),
+    },
+    rumble: true,
+};
+
 /// Report 0x01 behind its DATA header.
-pub fn controls(s: &State) -> Vec<u8> {
+pub fn controls(s: &PadState) -> Vec<u8> {
     let mut r = vec![0xA1, 0x01];
     // 0 is up and left, as the handheld's own axes.
     for v in s.sticks {
@@ -57,20 +77,24 @@ pub fn controls(s: &State) -> Vec<u8> {
         r.extend(((t as u32 * 1023 / 255) as u16).to_le_bytes());
     }
     // 1 is up, clockwise; 0 is nothing pressed.
-    r.push(if s.hat == HAT_CENTRED { 0 } else { s.hat + 1 });
+    r.push(if s.hat == Hat::Centred {
+        0
+    } else {
+        s.hat.raw() + 1
+    });
     // By position, as Xbox games expect: bottom is A whatever the handheld
     // prints on it.
     let order = [
-        button::SOUTH,  // A
-        button::EAST,   // B
-        button::WEST,   // X
-        button::NORTH,  // Y
-        button::L1,     // LB
-        button::R1,     // RB
-        button::SELECT, // View
-        button::START,  // Menu
-        button::L3,
-        button::R3,
+        Button::South,  // A
+        Button::East,   // B
+        Button::West,   // X
+        Button::North,  // Y
+        Button::L1,     // LB
+        Button::R1,     // RB
+        Button::Select, // View
+        Button::Start,  // Menu
+        Button::L3,
+        Button::R3,
     ];
     let bits = order
         .iter()
@@ -81,8 +105,8 @@ pub fn controls(s: &State) -> Vec<u8> {
 }
 
 /// Report 0x02: the Xbox button.
-pub fn guide(s: &State) -> Vec<u8> {
-    vec![0xA1, 0x02, s.pressed(button::HOME) as u8]
+pub fn guide(s: &PadState) -> Vec<u8> {
+    vec![0xA1, 0x02, s.pressed(Button::Home) as u8]
 }
 
 /// The rumble a host asked for, 0-255, from report 0x03 (starting at its
@@ -101,13 +125,48 @@ pub fn rumble(report: &[u8]) -> Option<u8> {
     Some((strongest.unwrap_or(0).min(100) as u16 * 255 / 100) as u8)
 }
 
+/// The encoder keeps the last Guide state because report 0x02 is sent only
+/// when that button changes, not with every report 0x01.
+#[derive(Default)]
+pub struct Codec {
+    last_home: Option<bool>,
+}
+
+impl CodecTrait for Codec {
+    fn packets(&mut self, state: &PadState, _elapsed: Duration) -> Reports {
+        let home = state.pressed(Button::Home);
+        let guide_changed = self.last_home != Some(home);
+        self.last_home = Some(home);
+        let controls = controls(state);
+        if guide_changed {
+            Reports::two(&controls, &guide(state))
+        } else {
+            Reports::one(&controls)
+        }
+    }
+
+    fn control(&mut self, message: &[u8], _link: &LinkContext, state: &PadState) -> Control {
+        // GET_REPORT(input) wants report 0x01 without the DATA header; the
+        // generic handler adds that header back.
+        let packet = controls(state);
+        hid::control(message, &packet[1..])
+    }
+
+    fn output(&mut self, report: &[u8], _link: &LinkContext) -> Output {
+        Output {
+            rumble: rumble(report),
+            disconnect: false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn report_one_is_fifteen_bytes_as_the_descriptor_declares() {
-        let r = controls(&State::default());
+        let r = controls(&PadState::default());
         assert_eq!(&r[..2], &[0xA1, 0x01]);
         assert_eq!(r.len(), 2 + 15);
         // Resting sticks sit at the middle, triggers and hat at zero.
@@ -117,15 +176,13 @@ mod tests {
 
     #[test]
     fn controls_land_where_an_xbox_pad_keeps_them() {
-        let mut s = State {
-            sticks: [0, 255, 128, 128],
-            triggers: [255, 0],
-            hat: 2, // right
-            ..Default::default()
-        };
-        s.set_button(button::SOUTH, true); // A
-        s.set_button(button::NORTH, true); // Y
-        s.set_button(button::START, true); // Menu
+        let mut s = PadState::default();
+        s.sticks = [0, 255, 128, 128];
+        s.triggers = [255, 0];
+        s.hat = Hat::Right;
+        s.set_button(Button::South, true); // A
+        s.set_button(Button::North, true); // Y
+        s.set_button(Button::Start, true); // Menu
         let r = controls(&s);
         assert_eq!(u16::from_le_bytes([r[2], r[3]]), 0);
         assert_eq!(u16::from_le_bytes([r[4], r[5]]), 65535);
@@ -136,10 +193,22 @@ mod tests {
 
     #[test]
     fn the_xbox_button_has_a_report_of_its_own() {
-        let mut s = State::default();
+        let mut s = PadState::default();
         assert_eq!(guide(&s), vec![0xA1, 0x02, 0]);
-        s.set_button(button::HOME, true);
+        s.set_button(Button::Home, true);
         assert_eq!(guide(&s), vec![0xA1, 0x02, 1]);
+    }
+
+    #[test]
+    fn the_codec_sends_guide_only_when_it_changes() {
+        let mut codec = Codec::default();
+        let mut s = PadState::default();
+        assert_eq!(codec.packets(&s, Duration::ZERO).iter().count(), 2);
+        assert_eq!(codec.packets(&s, Duration::ZERO).iter().count(), 1);
+        s.set_button(Button::Home, true);
+        let reports = codec.packets(&s, Duration::ZERO);
+        assert_eq!(reports.iter().count(), 2);
+        assert_eq!(reports.iter().last().unwrap()[1], 0x02);
     }
 
     #[test]
@@ -157,27 +226,6 @@ mod tests {
 
     #[test]
     fn the_descriptor_declares_report_one_at_the_size_sent() {
-        let (mut size, mut count, mut id, mut bits) = (0u32, 0u32, 0u8, 0u32);
-        let mut i = 0;
-        while i < DESCRIPTOR.len() {
-            let prefix = DESCRIPTOR[i];
-            let len = match prefix & 0x03 {
-                3 => 4,
-                n => n as usize,
-            };
-            let value = DESCRIPTOR[i + 1..i + 1 + len]
-                .iter()
-                .rev()
-                .fold(0u32, |v, b| v << 8 | *b as u32);
-            match prefix & 0xFC {
-                0x74 => size = value,
-                0x94 => count = value,
-                0x84 => id = value as u8,
-                0x80 if id == 1 => bits += size * count,
-                _ => {}
-            }
-            i += 1 + len;
-        }
-        assert_eq!(bits, 15 * 8);
+        assert_eq!(crate::test_support::input_bits(DESCRIPTOR, Some(1)), 15 * 8);
     }
 }

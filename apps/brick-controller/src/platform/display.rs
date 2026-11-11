@@ -26,9 +26,11 @@ const DEFAULT_BRIGHTNESS: u16 = 96;
 const RESTORE_FILE: &str = "screen-off";
 
 fn restore_path() -> PathBuf {
-    crate::data_dir().join(RESTORE_FILE)
+    crate::paths::data_dir().join(RESTORE_FILE)
 }
 
+/// The vendor ioctls take a four-word argument block; only the first word or
+/// two are meaningful, but the driver expects the full array.
 fn ioctl(fd: libc::c_int, request: libc::c_ulong, args: &mut [libc::c_ulong; 4]) -> libc::c_int {
     // The ioctl request is an `int` on Linux and an `unsigned long` on the
     // host used for tests; `as _` lets each target pick its own type.
@@ -71,6 +73,10 @@ fn save_restore(value: u16) -> io::Result<()> {
 }
 
 /// Switch the panel off and back on, remembering the brightness it had.
+///
+/// `saved` is the raw value to write back. It is captured at open time rather
+/// than read at each wake because the panel may already be dark when the app
+/// starts; in that case the on-disk marker from the previous run wins.
 pub struct Backlight {
     file: Option<File>,
     saved: u16,
@@ -135,6 +141,8 @@ impl Backlight {
 
 impl Drop for Backlight {
     fn drop(&mut self) {
+        // A panic or early return must not leave the panel dark; `on` is a
+        // no-op when it was never switched off.
         self.on();
     }
 }

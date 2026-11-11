@@ -78,6 +78,8 @@ impl Rumble {
         })
     }
 
+    /// Set the requested strength; the worker thread picks it up on its next
+    /// cycle. This never blocks the HID loop on a sysfs write.
     pub fn set(&self, level: u8) {
         self.level.store(level, Ordering::Relaxed);
     }

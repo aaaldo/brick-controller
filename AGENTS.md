@@ -15,7 +15,8 @@ Périmètre actuel :
 - **Phase 3** : `tg5050` (Smart Pro S).
 - **H700** : plus tard, hors périmètre immédiat.
 - **Hôtes** : macOS, Windows, Linux/SteamOS, Android, iPadOS.
-- **Profils HID** : PC (HID générique) et Xbox (identité Xbox Wireless
+- **Profils HID** : PC (HID générique), Xbox (identité Xbox Wireless
+  Controller), PlayStation (identité DualShock 4) et Switch (Switch Pro
   Controller), choisis **lors de l'appairage**.
 - **Navigation de l'app** : écran **Devices** comme accueil sans hôte.
   Menu+Start maintenu 1 s déconnecte et ouvre Devices depuis la vue Connected,
@@ -33,6 +34,8 @@ Périmètre actuel :
 
 - Répondre en français formel, avec « vous » ; pas d'emojis.
 - Favoriser KISS et DRY ; extraire la logique partagée plutôt que dupliquer.
+- Respecter l'architecture de la section **Architecture** : toute nouvelle
+  logique de profil va dans `profiles/`, jamais dans `main.rs`.
 - Les commentaires expliquent **pourquoi**, pas ce que le code fait déjà.
 - Créer une branche dédiée avant toute modification de complexité moyenne ou
   élevée (nouvelle fonctionnalité, refactor, changement d'architecture).
@@ -66,6 +69,15 @@ VERSION=0.1.0 ./apps/brick-controller/deploy/package.sh
 Le binaire est **statique `aarch64-musl`** : aucun runtime Rust ni dépendance
 dynamique n'est nécessaire sur la Brick.
 
+### Diagnostic rust-analyzer
+
+Si l'éditeur affiche des erreurs en cascade sur `#[derive(...)]`, `format!` ou
+`include_bytes!`, rust-analyzer n'a probablement pas trouvé `rustc` : son
+processus n'hérite pas toujours du `PATH` du shell. Vérifier que
+`$HOME/.cargo/bin` est dans le `PATH` du serveur LSP, ou renseigner
+`cargo.extraEnv.PATH` et `server.extraEnv.PATH` dans les réglages de l'éditeur.
+La référence reste `cargo check --workspace --all-targets`.
+
 ### Déploiement et diagnostic
 
 ```bash
@@ -90,29 +102,81 @@ ssh -p 22 root@<ip>
 Utiliser le **port USB-C inférieur** pour ADB et pour le mode périphérique.
 Le port supérieur est un port hôte.
 
-## Structure cible
+## Architecture
+
+Les profils, l'état d'entrée, le transport Bluetooth, la plateforme, la
+session et l'interface sont désormais séparés en modules. L'architecture
+ci-dessous est la **cible normative** pour toute nouvelle évolution. Chaque
+étape doit compiler et passer les tests.
+
+### Principes
+
+- **Cœur pur, périphérie impérative** : `profiles/`, `input.rs` et `hid.rs` ne
+  font aucune E/S, ne lisent pas l'horloge et n'impriment rien. Ils transforment
+  un état en octets et des octets en actions ; la session fournit le temps et
+  les canaux.
+- **Ensemble fermé de profils** : un `enum` et un dispatch statique. Pas de
+  `Box<dyn Trait>` ni de registre dynamique tant que les profils sont connus à
+  la compilation.
+- **Un fichier par protocole** : identité, descripteur, encodage des rapports,
+  décodage des sorties et tests du profil vivent dans le même module.
+- **Métadonnées séparées de l'état** : `ProfileSpec` décrit l'identité ;
+  `Codec` porte l'état nécessaire aux rapports (compteur, horodatage, file de
+  réponses Switch).
+- **Dépendances orientées** : `profiles` ne connaît ni BlueZ, ni L2CAP, ni
+  l'interface. `ui` ne connaît pas `Profile`.
+- **Interfaces étroites** : `pub(crate)` par défaut ; un module exporte
+  uniquement ce que son parent utilise.
+- **Tests au plus près du code** : tests unitaires dans chaque module, plus une
+  suite de conformité commune à tous les profils.
+
+### Arborescence cible
+
+Le style retenu est `foo.rs` + dossier `foo/`, sans fichiers `mod.rs`.
 
 ```text
 apps/brick-controller/
 ├── Cargo.toml
 ├── src/
-│   ├── main.rs
-│   ├── bluez.rs
-│   ├── l2cap.rs
-│   ├── hid.rs
-│   ├── xbox.rs
-│   ├── ds4.rs
-│   ├── display.rs
-│   ├── rumble.rs
-│   ├── sdp.rs
-│   ├── pad.rs
-│   └── platform/
-│       ├── mod.rs
-│       ├── input_trimui.rs
-│       ├── input_h700.rs        # plus tard
-│       ├── bluetooth_init.rs    # tg5040 / tg5050
-│       ├── bluetooth_systemd.rs # h700, plus tard
-│       └── battery.rs
+│   ├── main.rs                     # bootstrap, sous-commande restore
+│   ├── app.rs                      # boucle applicative, réexports
+│   ├── app/
+│   │   ├── session.rs              # machine à états d'une session Bluetooth
+│   │   ├── settings.rs             # hôtes, profil par hôte, mode, hôte courant
+│   │   ├── tests.rs                # tests de navigation et aperçus
+│   │   └── view_model.rs           # Screen -> ui::View
+│   ├── profiles.rs                 # Profile, ProfileSpec, Controller
+│   ├── profiles/
+│   │   ├── spec.rs                 # métadonnées statiques et registre ALL
+│   │   ├── codec.rs                # trait Codec, AnyCodec, Reports, Output
+│   │   ├── generic_hid.rs          # profil PC
+│   │   ├── xbox.rs                 # Xbox Wireless Controller
+│   │   ├── dualshock4.rs           # PlayStation, identité DualShock 4
+│   │   └── switch_pro.rs           # Switch Pro Controller
+│   ├── hid.rs                      # transactions et trames HID communes
+│   ├── input.rs                    # PadState, Button, Hat, état neutre
+│   ├── bluetooth.rs                # réexports du transport
+│   ├── bluetooth/
+│   │   ├── address.rs              # Address partagée
+│   │   ├── bluez.rs                # D-Bus BlueZ
+│   │   ├── l2cap.rs                # sockets L2CAP
+│   │   └── sdp.rs                  # enregistrement SDP
+│   ├── platform.rs
+│   ├── platform/
+│   │   ├── display.rs              # rétroéclairage
+│   │   ├── rumble.rs               # moteur
+│   │   ├── status.rs               # batterie, charge, Wi-Fi, horloge
+│   │   ├── input_trimui.rs         # evdev TrimUI
+│   │   ├── input_h700.rs           # phase 4, prévu
+│   │   └── bluetooth_init.rs       # tg5040 / tg5050, prévu
+│   ├── ui.rs                       # réexports, layout et primitives de dessin
+│   ├── ui/
+│   │   ├── theme.rs                # Theme, couleurs et nextval.elf
+│   │   ├── widgets.rs              # lignes, footers, modales, barre de chargement
+│   │   ├── screens.rs              # rendu des View
+│   │   ├── renderer.rs             # thread de rendu, animation
+│   │   └── preview.rs              # aperçus, uniquement en test
+│   └── test_support.rs             # analyse de descripteur partagée par les tests
 ├── deploy/
 │   ├── launch.sh
 │   └── package.sh
@@ -124,7 +188,167 @@ dist/                            # archives générées
 ```
 
 Le code doit rester aussi proche que possible de Padpod pour faciliter les
-montées de version et conserver les crédits.
+montées de version et conserver les crédits. Le déplacement des profils dans
+`profiles/` est une réorganisation : la logique de Padpod, ses commentaires de
+protocole et ses notices doivent être conservés, pas réécrits.
+
+### Responsabilités des modules
+
+| Module | Rôle | Ne doit pas |
+|---|---|---|
+| `main.rs` | bootstrap, `restore`, appel de `app::run` | contenir de la logique de profil |
+| `app/session.rs` | machine à états, lien Bluetooth, extinction, filtrage des entrées | connaître les détails d'un protocole |
+| `app/settings.rs` | hôtes, profil par hôte, `mode`, hôte courant | lire l'écran ou le pad |
+| `app/view_model.rs` | `Screen`/`Settings` -> `ui::View` | dessiner |
+| `profiles/spec.rs` | `Profile`, `ProfileSpec`, `ALL`, clés, DeviceID | encoder un rapport |
+| `profiles/codec.rs` | `Codec`, `AnyCodec`, `Controller`, `Reports`, `Output` | faire des E/S |
+| `profiles/<protocole>.rs` | identité, descripteur, rapports, sorties, tests | importer `bluez`, `l2cap`, `ui` ou `app` |
+| `hid.rs` | transactions, trames DATA, handshake commun | connaître une identité de manette |
+| `input.rs` | `PadState`, `Button`, `Hat`, état neutre | lire evdev |
+| `bluetooth/*` | BlueZ, L2CAP, SDP, `Address` | connaître les profils |
+| `platform/*` | écran, moteur, batterie, thème, evdev | connaître les profils |
+| `ui/*` | thème, widgets, écrans, rendu, aperçus | connaître `Profile` ou `Settings` |
+| `test_support.rs` | analyse de descripteur, helpers de test | être compilé hors des tests |
+
+### Contrat d'un profil
+
+```rust
+pub struct ProfileSpec {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub bluetooth_name: &'static str,
+    pub usb: Option<UsbId>,
+    pub descriptor: &'static [u8],
+    pub schedule: Schedule,
+    pub rumble: bool,
+}
+
+pub enum Schedule {
+    OnChange { min_gap: Duration },
+    Periodic { every: Duration },
+}
+
+pub trait Codec {
+    fn packets(&mut self, state: &PadState, elapsed: Duration) -> Reports;
+    fn control(&mut self, message: &[u8], link: &LinkContext, state: &PadState) -> hid::Control;
+    fn output(&mut self, report: &[u8], link: &LinkContext) -> Output;
+}
+
+pub struct LinkContext {
+    pub local: Address,
+    pub peer: Address,
+}
+
+pub struct Output {
+    pub rumble: Option<u8>,
+    pub disconnect: bool,
+}
+```
+
+- `Profile` est l'identité stable et sérialisée (`pc`, `xbox`, `ps4`,
+  `switch`). `ProfileSpec` porte les métadonnées immuables. `Codec` porte
+  l'état du protocole.
+- `AnyCodec` est l'`enum` de dispatch :
+
+  ```rust
+  enum AnyCodec {
+      Pc(generic_hid::Codec),
+      Xbox(xbox::Codec),
+      PlayStation(dualshock4::Codec),
+      Switch(switch_pro::Codec),
+  }
+  ```
+
+- `Controller` est la façade utilisée par `app/session.rs` :
+
+  ```rust
+  pub struct Controller {
+      profile: Profile,
+      codec: AnyCodec,
+  }
+
+  impl Controller {
+      pub fn new(profile: Profile) -> Self;
+      pub fn spec(&self) -> &'static ProfileSpec;
+      pub fn packets(&mut self, state: &PadState, elapsed: Duration) -> Reports;
+      pub fn control(&mut self, message: &[u8], link: &LinkContext, state: &PadState) -> hid::Control;
+      pub fn output(&mut self, report: &[u8], link: &LinkContext) -> Output;
+  }
+  ```
+
+- `packets` renvoie un ou deux rapports. Le deuxième sert au rapport Guide de
+  Xbox, séparé du rapport principal.
+- `Reports` doit éviter les allocations sur le chemin chaud : capacité fixe,
+  premier rapport et second optionnel.
+- `output` traite les rapports de sortie : rumble, sous-commandes Switch,
+  demande de déconnexion. Un même rapport peut demander du rumble et une
+  déconnexion.
+- Aucun profil ne connaît `Channel`, `Link`, `bluez` ou `ui`.
+
+### Règles de dépendances
+
+```text
+main -> app
+app  -> profiles, bluetooth, platform, ui, input
+profiles -> input, hid, bluetooth::address
+bluetooth -> address
+ui -> platform::status (données uniquement)
+platform -> OS
+hid -> std
+input -> std
+```
+
+- `profiles` n'importe jamais `bluez`, `l2cap`, `ui`, `app` ou `platform`.
+- `hid` n'importe jamais `profiles`.
+- `ui` ne connaît pas `Profile` ; `app::view_model` lui passe des libellés et
+  des lignes.
+- `bluetooth` ne connaît pas les profils ; `app` lui passe le nom et le
+  descripteur.
+- Aucun cycle de dépendances. Aucun module `utils.rs` ou `common.rs`.
+
+### Ajouter un profil
+
+1. Créer `profiles/<protocole>.rs` avec `SPEC`, le descripteur, `Codec` et ses
+   tests.
+2. Ajouter la variante dans `Profile`, l'arm de `spec()` et l'entrée dans
+   `Profile::ALL`.
+3. Ajouter la variante dans `AnyCodec` et les délégations.
+4. Passer la suite de conformité.
+5. Mettre à jour `README.md` et `CREDITS.md`.
+
+Aucune modification de `app/session.rs`, de l'interface ou du transport ne doit
+être nécessaire. C'est le critère de réussite de l'architecture.
+
+### Migration
+
+Le refactor se fait dans cet ordre, chaque étape étant compilable et testée :
+
+1. **fait** — extraction de `input.rs`, `hid.rs` allégé et `profiles/` ;
+2. **fait** — introduction de `ProfileSpec`, `Profile`, `Codec` et
+   `Controller` ;
+3. **fait** — câblage du profil PlayStation (DualShock 4) ;
+4. **fait** — découpage de `main.rs` en `app/session.rs`, `app/settings.rs` et
+   `app/view_model.rs` ;
+5. **fait** — ajout du profil Switch dans `profiles/switch_pro.rs` ;
+6. **fait** — découpage de `ui.rs` en `ui/theme.rs`, `ui/widgets.rs`,
+   `ui/screens.rs`, `ui/renderer.rs` et `ui/preview.rs`.
+
+Ne pas ajouter de nouveau `match profile` dans `main.rs` : la façade
+`Controller` est le seul point d'entrée. Les nouveaux profils suivent la
+procédure ci-dessus.
+
+### Commentaires et documentation
+
+- Chaque fichier commence par un `//!` qui dit sa responsabilité, sa frontière
+  et, pour un profil, la source du descripteur et du protocole.
+- Les fonctions non triviales documentent le contrat, les invariants et le
+  pourquoi ; pas de commentaire qui répète la ligne suivante.
+- Les valeurs de protocole (IDs de rapport, tailles, CRC, délais) sont
+  commentées avec leur origine ou leur unité.
+- Un commentaire qui décrit une cible non encore implémentée doit le dire
+  explicitement (« cible », « pas encore déclaré »).
+- Les commentaires de protocole repris de Padpod ou de deck-as-controller sont
+  conservés et crédités, pas réécrits.
 
 ## Pak NextUI
 
@@ -241,27 +465,38 @@ Règles :
   iPadOS. Profil par défaut.
 - **Xbox** : identité Xbox Wireless Controller (`045E:02FD`) pour XInput sous
   Windows et la prise en charge Xbox native sur macOS, iPadOS et Android.
+- **PlayStation** : identité DualShock 4 (`054C:09CC`), nom Bluetooth
+  « Wireless Controller », module `profiles/dualshock4.rs`. Il n'y a pas
+  d'identité DualSense distincte : le profil PlayStation présente une manette
+  DualShock 4.
+- **Switch** : identité Switch Pro Controller (`057E:2009`), nom Bluetooth
+  « Pro Controller », module `profiles/switch_pro.rs`. Le handshake Switch
+  (sous-commandes 0x01, réponses 0x21) est porté de `deck-as-controller` (MIT)
+  avec conservation de la notice. Pas d'IMU, NFC, IR ni HD rumble.
 - Le profil est stocké **par hôte** dans `$BRICK_CONTROLLER_DATA/profiles`
-  (`ADDR=pc` ou `ADDR=xbox`). L'identité utilisée au premier appairage est
-  mémorisée pour cet hôte et réutilisée pour le reconnecter.
+  (`ADDR=pc`, `ADDR=xbox`, puis `ADDR=ps4` ou `ADDR=switch`). L'identité
+  utilisée au premier appairage est mémorisée pour cet hôte et réutilisée pour
+  le reconnecter.
 - Le dernier profil utilisé est conservé dans `$BRICK_CONTROLLER_DATA/mode` :
   il sert de valeur par défaut au prochain appairage et survit à un
   redémarrage avant le réappairage.
-- Le profil d'un hôte **ne se modifie plus depuis Devices**. Le type PC/Xbox se
-  choisit uniquement lors d'un nouvel appairage, via l'écran Pairing puis X.
-  Pour changer le type d'un hôte existant, l'oublier sur la Brick et sur
-  l'hôte, choisir l'autre type dans l'écran d'appairage, puis réappairer.
-- Le nom Bluetooth, le descripteur HID, le DeviceID et l'alias de l'adaptateur
-  suivent le profil : « Brick Controller » ou « Xbox Wireless Controller ».
-- En mode Xbox, les rapports de sortie 0x03 reçus sur le canal interrupt ou par
-  SET_REPORT pilotent le moteur via `rumble.rs` (GPIO 227). Le mode PC n'a pas
-  de rapport de sortie : aucune vibration.
+- Le profil d'un hôte **ne se modifie plus depuis Devices**. Le type de
+  contrôleur se choisit uniquement lors d'un nouvel appairage, via l'écran
+  Pairing puis X. Pour changer le type d'un hôte existant, l'oublier sur la
+  Brick et sur l'hôte, choisir l'autre type dans l'écran d'appairage, puis
+  réappairer.
+- Le nom Bluetooth, le descripteur HID, le DeviceID (quand il existe) et
+  l'alias de l'adaptateur suivent le profil : « Brick Controller », « Xbox
+  Wireless Controller », « Wireless Controller » ou « Pro Controller ».
+- Les profils Xbox, PlayStation et Switch pilotent le moteur via
+  `platform/rumble.rs` (GPIO 227) à partir de leurs rapports de sortie
+  respectifs. Le mode PC n'a pas de rapport de sortie : aucune vibration.
 - Start et Select sont envoyés à l'hôte comme boutons de manette.
 - L'écran **Devices** est l'écran d'accueil. Il liste toujours les hôtes appairés
   puis **Pair a new device**, même lorsqu'un hôte est connecté. Son footer
   propose **B Quit**, **X Forget** et **A Connect**. Oublier un hôte demande
   toujours confirmation. Il n'y a plus d'écran de détail ni de changement de
-  type PC/Xbox pour un hôte déjà appairé.
+  type de contrôleur pour un hôte déjà appairé.
 - Aucune connexion n'est automatique : au lancement, aucune adresse enregistrée
   n'est contactée. Ouvrir Devices coupe la connexion en cours, la tentative de
   connexion et l'appairage en cours (cible du reconnecteur effacée, discoverable
@@ -286,7 +521,7 @@ Règles :
 - Au retour à la vue controller, les rapports restent neutres jusqu'au
   relâchement de toutes les touches utilisées dans l'interface.
 - Le choix du type de contrôleur se fait uniquement lors de l'appairage : dans
-  l'écran Pairing, X ouvre la liste PC/Xbox pour le prochain appairage.
+  l'écran Pairing, X ouvre la liste des profils pour le prochain appairage.
   Choisir un autre type redémarre la session Bluetooth avec la nouvelle
   identité et réaffiche Devices. Aucun changement de type n'est proposé pour un
   hôte déjà appairé.
@@ -327,7 +562,13 @@ reconstruire avant le test.
 ### Tests unitaires
 
 - descripteurs HID et encodage des rapports ;
+- suite de conformité `Profile::ALL` : clé unique et round-trip, descripteur
+  non vide, longueur des paquets conforme au descripteur, paquet neutre,
+  cohérence du profil ;
+- analyseur de descripteur partagé dans `test_support.rs`, jamais recopié dans
+  chaque profil ;
 - SDP et canaux L2CAP ;
+- sous-commandes Switch, réponses 0x21 et lecture SPI ;
 - mapping des boutons et des axes ;
 - restauration Bluetooth et chemins de secours.
 
@@ -349,13 +590,16 @@ reconstruire avant le test.
 - popup « Connecting to <hôte> » : blocage des entrées, barre color1 animée,
   texte color4, disparition à la connexion ou après 15 s ;
 - X Forget dans Devices : confirmation, oubli de l'hôte, retour à la liste ;
-- choix PC/Xbox uniquement dans l'écran Pairing, puis réappairage complet ;
+- choix du profil uniquement dans l'écran Pairing, puis réappairage complet ;
 - aucune fuite de D-pad/A/B/Menu/Start/Select vers l'hôte dans l'interface ;
 - extinction après 10 s, rallumage par appui Menu+Start et nouveau cycle de 10 s ;
 - vue controller : titre « Connected », hôte et profil, sans liste d'évènements ;
-- choix PC/Xbox lors d'un nouvel appairage, redémarrage de session et réappairage ;
+- choix du profil lors d'un nouvel appairage, redémarrage de session et
+  réappairage ;
 - vibrations en mode Xbox : rapport 0x03 sur le canal interrupt et SET_REPORT,
   moteur arrêté à la déconnexion et à la sortie ;
+- profils PlayStation et Switch : appairage, boutons, sticks centrés, rumble
+  et reconnexion ;
 - sortie propre et restauration NextUI ;
 - crash de l'application et récupération ;
 - Bluetooth désactivé au lancement ;
@@ -382,6 +626,12 @@ Logs utiles : `$LOGS_PATH/BrickController.txt`, `dmesg`, `btmon`,
 | Oublier `sync` après écriture FAT | État corrompu après coupure | `sync` dans le cleanup |
 | Éteindre `/dev/disp` sans mémoriser la luminosité | Écran noir après un crash | Fichier `screen-off`, `restore`, `syncsettings.elf` |
 | Laisser deux instances du Pak | `Address in use`, écran Bluetooth trompeur, entrées partagées | Verrou PID dans `launch.sh`, arrêt de l'instance précédente |
+| Ajouter un profil dans `main.rs` | `match profile` dispersés, session couplée aux protocoles | `profiles/<protocole>.rs` + `AnyCodec` |
+| `Box<dyn Trait>` pour les profils | Dispatch dynamique inutile pour un ensemble fermé | `enum` + dispatch statique |
+| Profil qui importe `bluez` ou `l2cap` | Protocole couplé au transport, tests impossibles sur l'hôte | `LinkContext`, `Address`, aucun socket dans `profiles` |
+| `utils.rs` ou `common.rs` | Dépôt fourre-tout, dépendances illisibles | Module nommé par domaine |
+| Analyseur de descripteur recopié par profil | Tests qui divergent et faux positifs | `test_support::descriptor` |
+| Logique d'écran dans `profiles` | Profil dépendant de l'interface | `app::view_model` |
 
 ## Sécurité et récupération
 
@@ -422,7 +672,7 @@ Le README doit couvrir :
 - installation manuelle du `.pak` ;
 - activation du Bluetooth dans NextUI ;
 - appairage macOS/Windows/Linux/Android/iPadOS ;
-- profils PC et Xbox par hôte ;
+- profils de manette par hôte (PC, Xbox, puis PlayStation et Switch) ;
 - limite « Bluetooth uniquement » ;
 - absence de sticks/gyro/trackpads sur Brick standard ;
 - partage d'antenne Wi-Fi/Bluetooth ;
@@ -450,6 +700,8 @@ Le merge et le push restent soumis à approbation humaine.
 
 - **Phase 1** : Brick standard `tg5040`, Bluetooth, profils PC et Xbox par
   hôte.
+- **Phase 1b** : profils PlayStation (DualShock 4) et Switch (Pro Controller)
+  par hôte.
 - **Phase 2** : Brick Pro et Smart Pro.
 - **Phase 3** : Smart Pro S `tg5050`.
 - **Phase 4** : H700, si nécessaire.
