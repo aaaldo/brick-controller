@@ -33,6 +33,12 @@ pub enum Schedule {
 pub struct ProfileSpec {
     pub key: &'static str,
     pub label: &'static str,
+    /// The name the host sees, suffix included.
+    ///
+    /// The suffix names the emulated controller type. A host that has cached
+    /// several identities from the same adapter address can then tell them
+    /// apart in its Bluetooth list; the DeviceID and descriptor remain the
+    /// values that actually select its driver.
     pub bluetooth_name: &'static str,
     pub usb: Option<UsbId>,
     pub descriptor: &'static [u8],
@@ -134,6 +140,14 @@ mod tests {
             assert!(!spec.bluetooth_name.is_empty());
             assert!(!spec.descriptor.is_empty());
         }
+    }
+
+    #[test]
+    fn bluetooth_names_name_the_emulated_profile() {
+        assert_eq!(Profile::Pc.bt_name(), "Brick Controller (PC)");
+        assert_eq!(Profile::Xbox.bt_name(), "Brick Controller (Xbox)");
+        assert_eq!(Profile::PlayStation.bt_name(), "Brick Controller (PS4)");
+        assert_eq!(Profile::Switch.bt_name(), "Brick Controller (Switch)");
     }
 
     #[test]

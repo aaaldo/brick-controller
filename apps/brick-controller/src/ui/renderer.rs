@@ -204,7 +204,7 @@ mod tests {
         let frame = Frame {
             lang: Lang::En,
             view: View::Pairing {
-                identity: "Pro Controller".into(),
+                identity: "Brick Controller (Switch)".into(),
                 controller_type: "Switch",
                 reconnecting: None,
             },

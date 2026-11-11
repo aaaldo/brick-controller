@@ -87,8 +87,9 @@ Use the **bottom USB-C port** for ADB. The top port is a USB host port.
    screen and does not connect to a host on its own.
 3. To pair a new host, select **Pair a new device**, press **X** to choose the
    controller type, then open Bluetooth settings on the host and pair with the
-   name shown on the Brick: `Brick Controller`, `Xbox Wireless Controller`,
-   `Wireless Controller` (PlayStation) or `Pro Controller` (Switch).
+   name shown on the Brick: `Brick Controller (PC)`,
+   `Brick Controller (Xbox)`, `Brick Controller (PS4)` or
+   `Brick Controller (Switch)`.
 4. To use an already paired host, select it and press **Connect**. A blocking
    **Connecting to <device>** popup is shown while the link is established.
    After that, the controller view shows the host and the profile. The panel
@@ -114,16 +115,18 @@ The identity is chosen when pairing a new host:
   GameController-based games ignore it. Use the Xbox, PlayStation or Switch
   profile on Apple hosts.
 - **Xbox** advertises the Brick as an Xbox Wireless Controller
-  (`045E:02FD`), for XInput on Windows and native Xbox support on macOS,
-  iPadOS and Android. It reads the host's rumble output report.
+  (`045E:02FD`, Bluetooth name `Brick Controller (Xbox)`), for XInput on
+  Windows and native Xbox support on macOS, iPadOS and Android. It reads the
+  host's rumble output report.
 - **PlayStation** presents a DualShock 4 (`054C:09CC`, Bluetooth name
-  `Wireless Controller`). Hosts that support the DualShock 4 recognise it
+  `Brick Controller (PS4)`). Hosts that support the DualShock 4 recognise it
   natively, including Windows, macOS, Linux, Android and iPadOS. It reads
   rumble from the host.
 - **Switch** presents a Switch Pro Controller (`057E:2009`, Bluetooth name
-  `Pro Controller`). The SDP Device ID advertises that USB identity, so macOS,
-  iPadOS and Windows bind their native Pro Controller driver. It implements the
-  Switch handshake and the 0x30/0x21 reports. It reads rumble from the host.
+  `Brick Controller (Switch)`). The SDP Device ID advertises that USB identity,
+  so macOS, iPadOS and Windows bind their native Pro Controller driver. It
+  implements the Switch handshake and the 0x30/0x21 reports. It reads rumble
+  from the host.
 
 Open **Pair a new device**, press **X** to choose the controller type, then pair
 from the host. Choosing another type restarts the Bluetooth session with the

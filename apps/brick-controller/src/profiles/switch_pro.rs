@@ -26,7 +26,7 @@ use crate::input::{Button, Hat, PadState};
 use std::collections::VecDeque;
 use std::time::Duration;
 
-pub const NAME: &str = "Pro Controller";
+pub const NAME: &str = "Brick Controller (Switch)";
 /// The Pro Controller's USB identity, published in the SDP Device ID record.
 ///
 /// macOS, iPadOS and Windows match their native Pro Controller driver on these

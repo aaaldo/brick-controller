@@ -477,15 +477,16 @@ Règles :
   il n'apparaît ni dans Réglages Système > Manettes, ni dans les jeux qui
   utilisent ce framework. Sur un hôte Apple, utiliser Xbox, PlayStation ou
   Switch.
-- **Xbox** : identité Xbox Wireless Controller (`045E:02FD`) pour XInput sous
-  Windows et la prise en charge Xbox native sur macOS, iPadOS et Android.
+- **Xbox** : identité Xbox Wireless Controller (`045E:02FD`), nom Bluetooth
+  « Brick Controller (Xbox) », pour XInput sous Windows et la prise en charge
+  Xbox native sur macOS, iPadOS et Android.
 - **PlayStation** : identité DualShock 4 (`054C:09CC`), nom Bluetooth
-  « Wireless Controller », module `profiles/dualshock4.rs`. Il n'y a pas
+  « Brick Controller (PS4) », module `profiles/dualshock4.rs`. Il n'y a pas
   d'identité DualSense distincte : le profil PlayStation présente une manette
   DualShock 4.
 - **Switch** : identité Switch Pro Controller (`057E:2009`), nom Bluetooth
-  « Pro Controller », module `profiles/switch_pro.rs`. L'identité USB est
-  publiée dans le record SDP Device ID : sans elle, BlueZ annonce
+  « Brick Controller (Switch) », module `profiles/switch_pro.rs`. L'identité
+  USB est publiée dans le record SDP Device ID : sans elle, BlueZ annonce
   `1D6B:0246` et macOS, iPadOS et Windows n'associent pas leur pilote Pro
   Controller natif. Le handshake Switch (sous-commandes 0x01, réponses 0x21)
   est porté de `deck-as-controller` (MIT) avec conservation de la notice. Pas
@@ -503,8 +504,9 @@ Règles :
   Brick et sur l'hôte, choisir l'autre type dans l'écran d'appairage, puis
   réappairer.
 - Le nom Bluetooth, le descripteur HID, le DeviceID (quand il existe) et
-  l'alias de l'adaptateur suivent le profil : « Brick Controller », « Xbox
-  Wireless Controller », « Wireless Controller » ou « Pro Controller ».
+  l'alias de l'adaptateur suivent le profil : « Brick Controller (PC) »,
+  « Brick Controller (Xbox) », « Brick Controller (PS4) » ou
+  « Brick Controller (Switch) ».
 - Les profils Xbox, PlayStation et Switch pilotent le moteur via
   `platform/rumble.rs` (GPIO 227) à partir de leurs rapports de sortie
   respectifs. Le mode PC n'a pas de rapport de sortie : aucune vibration.

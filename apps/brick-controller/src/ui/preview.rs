@@ -91,7 +91,7 @@ fn preview_every_screen() {
         (
             "pairing",
             View::Pairing {
-                identity: tr(Lang::En, Key::AppName).into(),
+                identity: "Brick Controller (PC)".into(),
                 controller_type: "PC",
                 reconnecting: None,
             },
