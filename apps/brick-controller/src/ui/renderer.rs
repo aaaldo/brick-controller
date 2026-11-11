@@ -9,6 +9,7 @@
 //! when several more arrive is followed by the newest only.
 
 use super::{draw, Modal, Theme, View};
+use crate::i18n::Lang;
 use crate::platform::StatusInfo;
 use brick::canvas::Canvas;
 use brick::text::Fonts;
@@ -18,6 +19,7 @@ use std::time::{Duration, Instant};
 /// What the screen should show next.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Frame {
+    pub lang: Lang,
     pub view: View,
     pub status: StatusInfo,
     pub modal: Option<Modal>,
@@ -74,6 +76,7 @@ fn draw_frame(
         canvas,
         fonts,
         theme,
+        frame.lang,
         &frame.view,
         &frame.status,
         frame.modal.as_ref(),
@@ -184,6 +187,7 @@ impl Drop for Renderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::i18n::Lang;
 
     fn status() -> StatusInfo {
         StatusInfo {
@@ -198,6 +202,7 @@ mod tests {
     #[test]
     fn the_pairing_bar_keeps_the_renderer_animating() {
         let frame = Frame {
+            lang: Lang::En,
             view: View::Pairing {
                 identity: "Pro Controller".into(),
                 controller_type: "Switch",
@@ -213,6 +218,7 @@ mod tests {
     #[test]
     fn a_static_screen_does_not_animate() {
         let frame = Frame {
+            lang: Lang::En,
             view: View::Menu { rows: Vec::new() },
             status: status(),
             modal: None,

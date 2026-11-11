@@ -127,6 +127,10 @@ ci-dessous est la **cible normative** pour toute nouvelle évolution. Chaque
   l'interface. `ui` ne connaît pas `Profile`.
 - **Interfaces étroites** : `pub(crate)` par défaut ; un module exporte
   uniquement ce que son parent utilise.
+- **Chaînes visibles centralisées** : `i18n.rs` porte `Lang`, `Key` et les
+  valeurs ; `ui` et `app` n'écrivent aucun texte visible en dur. Seule la
+  langue anglaise (`Lang::En`) est livrée pour l'instant ; ajouter une langue
+  consiste à étendre `Lang` et la table, sans modifier les appelants.
 - **Tests au plus près du code** : tests unitaires dans chaque module, plus une
   suite de conformité commune à tous les profils.
 
@@ -154,6 +158,7 @@ apps/brick-controller/
 │   │   ├── dualshock4.rs           # PlayStation, identité DualShock 4
 │   │   └── switch_pro.rs           # Switch Pro Controller
 │   ├── hid.rs                      # transactions et trames HID communes
+│   ├── i18n.rs                     # Lang, Key, catalogue des chaînes visibles
 │   ├── input.rs                    # PadState, Button, Hat, état neutre
 │   ├── bluetooth.rs                # réexports du transport
 │   ├── bluetooth/
@@ -204,6 +209,7 @@ protocole et ses notices doivent être conservés, pas réécrits.
 | `profiles/codec.rs` | `Codec`, `AnyCodec`, `Controller`, `Reports`, `Output` | faire des E/S |
 | `profiles/<protocole>.rs` | identité, descripteur, rapports, sorties, tests | importer `bluez`, `l2cap`, `ui` ou `app` |
 | `hid.rs` | transactions, trames DATA, handshake commun | connaître une identité de manette |
+| `i18n.rs` | `Lang`, `Key`, catalogue des chaînes visibles, `tr` et `fill` | faire des E/S ou connaître `Profile` |
 | `input.rs` | `PadState`, `Button`, `Hat`, état neutre | lire evdev |
 | `bluetooth/*` | BlueZ, L2CAP, SDP, `Address` | connaître les profils |
 | `platform/*` | écran, moteur, batterie, thème, evdev | connaître les profils |
@@ -289,13 +295,14 @@ pub struct Output {
 
 ```text
 main -> app
-app  -> profiles, bluetooth, platform, ui, input
+app  -> profiles, bluetooth, platform, ui, input, i18n
 profiles -> input, hid, bluetooth::address
 bluetooth -> address
-ui -> platform::status (données uniquement)
+ui -> platform::status (données uniquement), i18n
 platform -> OS
 hid -> std
 input -> std
+i18n -> std
 ```
 
 - `profiles` n'importe jamais `bluez`, `l2cap`, `ui`, `app` ou `platform`.
@@ -304,6 +311,9 @@ input -> std
   des lignes.
 - `bluetooth` ne connaît pas les profils ; `app` lui passe le nom et le
   descripteur.
+- Toute chaîne visible passe par `i18n::tr` et `i18n::fill`. Les journaux, les
+  identités Bluetooth, les marques de profils et les libellés imprimés sur les
+  touches restent en anglais.
 - Aucun cycle de dépendances. Aucun module `utils.rs` ou `common.rs`.
 
 ### Ajouter un profil

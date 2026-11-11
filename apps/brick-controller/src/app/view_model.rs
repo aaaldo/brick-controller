@@ -10,6 +10,7 @@
 use super::session::Link;
 use super::settings::Settings;
 use crate::bluetooth::Address;
+use crate::i18n::{fill, tr, Key, Lang};
 use crate::profiles::Profile;
 use crate::ui::{Modal, Row, View};
 
@@ -98,6 +99,7 @@ pub fn view_for(
     link: Option<&Link>,
     profile: Profile,
     target: Option<Address>,
+    lang: Lang,
 ) -> View {
     match screen {
         Screen::Controller => View::Controller {
@@ -117,9 +119,9 @@ pub fn view_for(
                     MenuRow::Host(host_index) => {
                         let host = &settings.hosts[*host_index];
                         let status = if host.connected {
-                            "Connected"
+                            tr(lang, Key::Connected)
                         } else {
-                            "Offline"
+                            tr(lang, Key::Offline)
                         };
                         Row::new(
                             host.name.clone(),
@@ -128,7 +130,7 @@ pub fn view_for(
                         )
                     }
                     MenuRow::Pair => Row::new(
-                        "Pair a new device",
+                        tr(lang, Key::PairNew),
                         settings.pairing.label(),
                         index == cursor,
                     ),
@@ -155,18 +157,18 @@ pub fn view_for(
 ///
 /// The host name is resolved here, once, so the UI never needs to know how to
 /// find a host by address.
-pub fn modal_view(modal: &ModalState, settings: &Settings) -> Modal {
+pub fn modal_view(modal: &ModalState, settings: &Settings, lang: Lang) -> Modal {
     match modal {
         ModalState::Forget(index) => {
             let name = settings
                 .hosts
                 .get(*index)
                 .map(|host| host.name.clone())
-                .unwrap_or_else(|| "this controller".into());
+                .unwrap_or_else(|| tr(lang, Key::ThisController).into());
             Modal {
-                title: format!("Forget {name}?"),
-                message: "You will need to pair it again from the host.".into(),
-                confirm: "Forget",
+                title: fill(tr(lang, Key::ForgetTitle), &[("name", &name)]),
+                message: tr(lang, Key::ForgetMessage).into(),
+                confirm: tr(lang, Key::Forget),
                 destructive: true,
                 loading: false,
             }
@@ -179,7 +181,7 @@ pub fn modal_view(modal: &ModalState, settings: &Settings) -> Modal {
                 .map(|host| host.name.clone())
                 .unwrap_or_else(|| addr.to_string());
             Modal {
-                title: format!("Connecting to {name}"),
+                title: fill(tr(lang, Key::ConnectingTo), &[("name", &name)]),
                 message: String::new(),
                 confirm: "",
                 destructive: false,

@@ -6,6 +6,7 @@
 
 use super::theme::{hint_text, key_text, mix, outer_style, Theme};
 use super::{circle, round_rect, s, stroke, HINT_SIZE, ITEM_SIZE, KEY_SIZE, ROW_H, SMALL_SIZE};
+use crate::i18n::{tr, Key, Lang};
 use crate::platform::StatusInfo;
 use brick::canvas::{Canvas, Rgb};
 use brick::text::Fonts;
@@ -232,6 +233,7 @@ pub(super) fn draw_modal(
     canvas: &mut Canvas,
     fonts: &mut Fonts,
     theme: &Theme,
+    lang: Lang,
     modal: &Modal,
     phase: f32,
 ) {
@@ -294,11 +296,11 @@ pub(super) fn draw_modal(
         );
     }
     let confirm = if modal.confirm.is_empty() {
-        "Confirm"
+        tr(lang, Key::Confirm)
     } else {
         modal.confirm
     };
-    let cancel = [item("B", "Cancel")];
+    let cancel = [item("B", tr(lang, Key::Cancel))];
     let accept = [item("A", confirm)];
     let gap = s(canvas, 15);
     let cancel_w = group_width(canvas, fonts, &cancel);
@@ -382,7 +384,13 @@ pub(super) fn loading_bar(
 /// The progression is determinate because the hold has a known duration; the
 /// HID report is already neutral at this point, so the overlay is purely a
 /// visual confirmation that the chord is doing something.
-pub(super) fn draw_hold(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, progress: f32) {
+pub(super) fn draw_hold(
+    canvas: &mut Canvas,
+    fonts: &mut Fonts,
+    theme: &Theme,
+    lang: Lang,
+    progress: f32,
+) {
     let w = canvas.width();
     let h = canvas.height();
     canvas.blend_rect(0, 0, w, h, Rgb(0, 0, 0), 150);
@@ -401,7 +409,7 @@ pub(super) fn draw_hold(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, p
     );
     fonts.draw_centred(
         canvas,
-        "Keep holding to disconnect…",
+        tr(lang, Key::HoldTitle),
         w / 2,
         box_y + s(canvas, 72),
         ITEM_SIZE,
@@ -409,7 +417,7 @@ pub(super) fn draw_hold(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, p
     );
     fonts.draw_centred(
         canvas,
-        "Input is paused while Menu and Start are held.",
+        tr(lang, Key::HoldMessage),
         w / 2,
         box_y + s(canvas, 118),
         SMALL_SIZE,
