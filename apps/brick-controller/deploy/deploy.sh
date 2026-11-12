@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Build, package and push the pak to a NextUI device over ADB.
 #
-#   VERSION=0.1.0 ./apps/brick-controller/deploy/deploy.sh
+#   VERSION=v1.0.0 ./apps/brick-controller/deploy/deploy.sh
 #
 # The bottom USB-C port is the device/ADB port. The top port is host-only.
 set -eu

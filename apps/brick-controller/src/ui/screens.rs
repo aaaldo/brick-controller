@@ -38,6 +38,12 @@ pub enum View {
         title: String,
         message: String,
     },
+    /// A model this build cannot drive yet. Unlike `Error`, there is nothing
+    /// to retry: the only action is to quit and keep NextUI's Bluetooth alive.
+    Unsupported {
+        title: String,
+        message: String,
+    },
 }
 
 /// Draw one frame. A modal or a hold overlay can sit on top of any screen.
@@ -134,6 +140,11 @@ pub fn draw(
                 &[item("B", tr(lang, Key::Quit))],
                 &[item("A", tr(lang, Key::Retry))],
             );
+        }
+        View::Unsupported { title, message } => {
+            header(canvas, fonts, theme, status, title);
+            draw_error(canvas, fonts, theme, message);
+            footer(canvas, fonts, theme, &[item("B", tr(lang, Key::Quit))], &[]);
         }
     }
 
@@ -328,11 +339,12 @@ fn draw_pairing(
     );
 }
 
-/// The recovery screen shown when Bluetooth cannot be taken over.
+/// The recovery or notice screen shown when the app cannot continue.
 ///
-/// A single hint label is enough here: the footer offers Retry and Quit. The
-/// message uses the same size and colour as the hint labels on the Connected
-/// and Pairing screens, and is centred like the Pairing block.
+/// The caller chooses the footer: `Error` offers Retry and Quit, while
+/// `Unsupported` only offers Quit. The message uses the same size and colour
+/// as the hint labels on the Connected and Pairing screens, and is centred
+/// like the Pairing block.
 fn draw_error(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, message: &str) {
     let margin = s(canvas, 30);
     let max_w = canvas.width() - margin * 2;

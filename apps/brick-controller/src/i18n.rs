@@ -77,6 +77,8 @@ keys! {
     StartingBluetooth,
     ErrorTitle,
     BluetoothActivationError,
+    UnsupportedDeviceTitle,
+    UnsupportedDeviceMessage,
 }
 
 /// The string for `key` in `lang`.
@@ -138,6 +140,10 @@ fn english(key: Key) -> &'static str {
         Key::ErrorTitle => "Error",
         Key::BluetoothActivationError => {
             "A problem occurred during Bluetooth activation. Please try again."
+        }
+        Key::UnsupportedDeviceTitle => "Unsupported device",
+        Key::UnsupportedDeviceMessage => {
+            "Brick Controller supports the TrimUI Brick and Brick Pro only. Smart Pro support is planned."
         }
     }
 }

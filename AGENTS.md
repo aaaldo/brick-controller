@@ -65,7 +65,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo build --release --target aarch64-unknown-linux-musl -p brick-controller
 
-VERSION=0.1.0 ./apps/brick-controller/deploy/package.sh
+VERSION=v1.0.0 ./apps/brick-controller/deploy/package.sh
+./scripts/check-pak.sh v1.0.0
 ```
 
 Le binaire est **statique `aarch64-musl`** : aucun runtime Rust ni dépendance
@@ -608,7 +609,7 @@ Après toute modification de code source :
 2. `cargo clippy --workspace --all-targets -- -D warnings`
 3. `cargo test --workspace`
 4. `cargo build --release --target aarch64-unknown-linux-musl -p brick-controller`
-5. packaging du `.pak`
+5. packaging du `.pak`, puis `./scripts/check-pak.sh v1.0.0`
 6. test sur le Brick ou le Brick Pro
 
 Si une image Docker est utilisée pour l'outillage ou le firmware, la

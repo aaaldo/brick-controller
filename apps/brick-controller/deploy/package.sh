@@ -1,17 +1,17 @@
 #!/bin/sh
 # Copyright 2026 the Brick Controller contributors
 # SPDX-License-Identifier: GPL-3.0-only
-# Build the static binary and stage a NextUI .pak archive.
+# Build the static binary and stage the NextUI .pak archive.
 #
-#   VERSION=0.1.0 ./apps/brick-controller/deploy/package.sh
-#       -> dist/Brick Controller.pak.zip
+#   VERSION=v1.0.0 ./apps/brick-controller/deploy/package.sh
+#       -> dist/Brick.Controller.pak.zip
 #
-# The archive contains the contents of the pak folder, as the Pak Store
-# expects. Installation is a copy into Tools/tg5040 on the SD card.
+# The Pak Store extracts the archive into Tools/tg5040/<name>.pak, so the
+# entries must stay at the archive root and must not contain the pak folder.
 set -eu
 
 cd "$(dirname "$0")/.."
-ROOT=../..
+ROOT=$(cd ../.. && pwd)
 TARGET=aarch64-unknown-linux-musl
 VERSION="${VERSION:-dev}"
 APP="Brick Controller"
@@ -35,15 +35,27 @@ STAGE="$DIST/stage-$STAMP/$PAK"
 mkdir -p "$STAGE"
 
 cp "$BINARY" "$STAGE/brick-controller"
-cp deploy/launch.sh deploy/icon.png "$STAGE/"
+cp deploy/launch.sh deploy/icon.png deploy/README.txt "$STAGE/"
 cp "$ROOT/LICENSE" "$ROOT/ADDITIONAL-TERMS.md" "$ROOT/CREDITS.md" \
     "$ROOT/crates/brick/assets/OFL.txt" "$STAGE/"
-[ -f "$ROOT/README.md" ] && cp "$ROOT/README.md" "$STAGE/README.txt"
 
 chmod +x "$STAGE/brick-controller" "$STAGE/launch.sh"
 
-ARCHIVE="$DIST/$PAK.zip"
-( cd "$DIST/stage-$STAMP" && zip -qr "$ARCHIVE" "$PAK" )
+for file in launch.sh brick-controller icon.png README.txt LICENSE \
+    ADDITIONAL-TERMS.md CREDITS.md OFL.txt; do
+    [ -f "$STAGE/$file" ] || {
+        echo "missing $STAGE/$file" >&2
+        exit 1
+    }
+done
 
-echo "built $ARCHIVE"
-ls -l "$ARCHIVE"
+STORE_ARCHIVE="$DIST/Brick.Controller.pak.zip"
+
+# The Pak Store extracts into Tools/tg5040/<name>.pak, so these entries must
+# stay at the archive root. A top-level pak folder would be nested twice.
+( cd "$STAGE" && zip -qr "$STORE_ARCHIVE" \
+    launch.sh brick-controller icon.png README.txt \
+    LICENSE ADDITIONAL-TERMS.md CREDITS.md OFL.txt )
+
+echo "built $STORE_ARCHIVE"
+ls -l "$STORE_ARCHIVE"

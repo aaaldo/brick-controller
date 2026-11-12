@@ -172,7 +172,7 @@ dependencies = [
 
 [[package]]
 name = "brick"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "fontdue",
  "libc",
@@ -180,7 +180,7 @@ dependencies = [
 
 [[package]]
 name = "brick-controller"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "brick",
  "libc",
