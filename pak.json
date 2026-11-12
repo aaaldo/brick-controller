@@ -2,7 +2,7 @@
   "name": "Brick Controller",
   "version": "v1.0.0",
   "type": "TOOL",
-  "description": "Bluetooth HID gamepad for the TrimUI Brick and Brick Pro: PC, Xbox, PlayStation and Switch identities, no host driver. Brick Pro support is not yet hardware-validated; Smart Pro is not supported.",
+  "description": "Bluetooth HID gamepad for the TrimUI Brick and Brick Pro: PC, Xbox, PS4 and Switch identities, no host driver. Brick Pro support is not yet hardware-validated; Smart Pro is not supported.",
   "author": "Brick Controller contributors",
   "repo_url": "https://github.com/aaaldo/brick-controller",
   "release_filename": "Brick.Controller.pak.zip",
