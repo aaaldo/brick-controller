@@ -45,9 +45,19 @@ paired host, forget it on both sides and pair again.
 Controls
 --------
 Devices screen:
-  A  Connect the selected host, or open Pair a new device
+  A  Connect the selected host, or open Pair a new device or Settings
   X  Forget the selected host (confirmation required)
   B  Quit the app
+
+Settings:
+  A          Open Settings from Devices
+  Up/Down    Select a line
+  Left/Right Change the value
+  B          Return to Devices
+
+D-Pad Mode sends the D-pad as a D-pad or as the left stick. Rumble strength
+scales the host request: Off, Low (30%), Mid (60%), Strong (90%). Both settings
+are saved on the SD card and survive a restart.
 
 Connected:
   Menu             Send Home/Guide to the host

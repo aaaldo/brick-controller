@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Build the static binary and stage the NextUI .pak archive.
 #
-#   VERSION=v1.0.0 ./apps/brick-controller/deploy/package.sh
+#   VERSION=v1.1.0 ./apps/brick-controller/deploy/package.sh
 #       -> dist/Brick.Controller.pak.zip
 #
 # The Pak Store extracts the archive into Tools/tg5040/<name>.pak, so the

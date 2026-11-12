@@ -71,8 +71,8 @@ wireless.
 
 ### Install
 
-The `v1.0.0` release is being submitted to Pak Store. Until it appears, use the
-manual installation.
+The `v1.1.0` release is available on GitHub. If it is not in Pak Store yet, use
+the manual installation.
 
 #### Manual installation
 
@@ -236,8 +236,8 @@ rustup target add aarch64-unknown-linux-musl
 cargo fmt --all
 cargo test --workspace
 cargo build --release --target aarch64-unknown-linux-musl -p brick-controller
-VERSION=v1.0.0 ./apps/brick-controller/deploy/package.sh
-./scripts/check-pak.sh v1.0.0
+VERSION=v1.1.0 ./apps/brick-controller/deploy/package.sh
+./scripts/check-pak.sh v1.1.0
 ```
 
 The binary is static; no Rust runtime is needed on the handheld.
