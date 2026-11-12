@@ -34,6 +34,24 @@ fn preview_menu_rows(linked: bool) -> Vec<Row> {
         Row::new("iPhone", format!("Xbox · {offline}"), false),
     ];
     rows.push(Row::new(tr(Lang::En, Key::PairNew), "PC", false));
+    rows.push(Row::new(
+        tr(Lang::En, Key::WiredConnection),
+        tr(Lang::En, Key::WiredDetail),
+        false,
+    ));
+    rows
+}
+
+/// The menu with the wired row selected, to check that `X Forget` disappears
+/// when the selection has no stored host.
+fn preview_wired_rows() -> Vec<Row> {
+    let mut rows = preview_menu_rows(true);
+    for row in &mut rows {
+        row.selected = false;
+    }
+    if let Some(last) = rows.last_mut() {
+        last.selected = true;
+    }
     rows
 }
 
@@ -66,6 +84,7 @@ fn preview_every_screen() {
             View::Controller {
                 host: "MacBook Pro".into(),
                 profile: "PC",
+                wired: false,
             },
             preview_status(true),
         ),
@@ -73,6 +92,7 @@ fn preview_every_screen() {
             "menu",
             View::Menu {
                 rows: preview_menu_rows(true),
+                can_forget: true,
             },
             preview_status(true),
         ),
@@ -80,6 +100,15 @@ fn preview_every_screen() {
             "menu-idle",
             View::Menu {
                 rows: preview_menu_rows(false),
+                can_forget: true,
+            },
+            preview_status(true),
+        ),
+        (
+            "menu-wired",
+            View::Menu {
+                rows: preview_wired_rows(),
+                can_forget: false,
             },
             preview_status(true),
         ),
@@ -104,10 +133,28 @@ fn preview_every_screen() {
             preview_status(true),
         ),
         (
+            "wired-waiting",
+            View::WiredWaiting {
+                identity: Profile::Pc.bt_name().into(),
+                controller_type: Profile::Pc.label(),
+            },
+            preview_status(true),
+        ),
+        (
+            "wired-connected",
+            View::Controller {
+                host: tr(Lang::En, Key::WiredHost).into(),
+                profile: Profile::Pc.label(),
+                wired: true,
+            },
+            preview_status(true),
+        ),
+        (
             "error",
             View::Error {
                 title: tr(Lang::En, Key::ErrorTitle).into(),
                 message: tr(Lang::En, Key::BluetoothActivationError).into(),
+                back: false,
             },
             preview_status(false),
         ),
@@ -157,6 +204,7 @@ fn preview_every_screen() {
         Lang::En,
         &View::Menu {
             rows: preview_menu_rows(true),
+            can_forget: true,
         },
         &preview_status(true),
         Some(&modal),
@@ -171,13 +219,10 @@ fn preview_every_screen() {
     )
     .unwrap();
 
-    let connecting = Modal {
-        title: fill(tr(Lang::En, Key::ConnectingTo), &[("name", "MacBook Pro")]),
-        message: String::new(),
-        confirm: "",
-        destructive: false,
-        loading: true,
-    };
+    let connecting = Modal::loading(fill(
+        tr(Lang::En, Key::ConnectingTo),
+        &[("name", "MacBook Pro")],
+    ));
     let mut canvas = Canvas::in_memory(1024, 768);
     draw(
         &mut canvas,
@@ -186,6 +231,7 @@ fn preview_every_screen() {
         Lang::En,
         &View::Menu {
             rows: preview_menu_rows(true),
+            can_forget: true,
         },
         &preview_status(true),
         Some(&connecting),
@@ -200,13 +246,7 @@ fn preview_every_screen() {
     )
     .unwrap();
 
-    let changing = Modal {
-        title: tr(Lang::En, Key::ChangingControllerType).into(),
-        message: String::new(),
-        confirm: "",
-        destructive: false,
-        loading: true,
-    };
+    let changing = Modal::loading(tr(Lang::En, Key::ChangingControllerType));
     let mut canvas = Canvas::in_memory(1024, 768);
     draw(
         &mut canvas,
@@ -233,9 +273,34 @@ fn preview_every_screen() {
     )
     .unwrap();
 
+    let returning = Modal::loading(tr(Lang::En, Key::ReturningToDevices));
+    let mut canvas = Canvas::in_memory(1024, 768);
+    draw(
+        &mut canvas,
+        &mut fonts,
+        &theme,
+        Lang::En,
+        &View::Menu {
+            rows: Vec::new(),
+            can_forget: false,
+        },
+        &preview_status(true),
+        Some(&returning),
+        None,
+        0.35,
+    );
+    png::write_png(
+        &format!("{dir}/returning.png"),
+        1024,
+        768,
+        &canvas.snapshot_rgb(),
+    )
+    .unwrap();
+
     let controller = View::Controller {
         host: "MacBook Pro".into(),
         profile: "PC",
+        wired: false,
     };
     let mut canvas = Canvas::in_memory(1024, 768);
     draw(

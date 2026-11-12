@@ -9,6 +9,8 @@ mod settings;
 #[cfg(test)]
 mod tests;
 mod view_model;
+#[cfg(target_os = "linux")]
+mod wired;
 
 use crate::i18n::{tr, Key, Lang};
 use crate::input::Button;
@@ -21,6 +23,14 @@ use brick::text::Fonts;
 use session::{session, SessionOutcome};
 use settings::{fallback_profile, profile_for_host, save_mode, saved_host};
 use std::os::unix::io::AsRawFd;
+use std::time::Duration;
+
+/// How long Menu+Start must be held to leave the controller view.
+pub(crate) const DISCONNECT_HOLD: Duration = Duration::from_millis(1000);
+
+/// After a host connects, the panel stays on this long, then goes dark until
+/// Menu+Start is pressed once. Shared by the Bluetooth and wired sessions.
+pub(crate) const SCREEN_OFF_AFTER: Duration = Duration::from_secs(10);
 
 /// The release, as `package.sh` builds it; "dev" for any other build.
 const VERSION: &str = match option_env!("BRICK_CONTROLLER_VERSION") {
@@ -37,6 +47,8 @@ pub(crate) enum StartScreen {
     Devices,
     /// Go straight to Pairing, so a newly chosen identity can be paired.
     Pairing,
+    /// Show the "Returning to Devices…" popup while Bluetooth restarts.
+    Restarting,
 }
 
 /// The screen to reopen after a profile switch.
@@ -49,6 +61,18 @@ fn start_after_switch(pairing: bool) -> StartScreen {
     } else {
         StartScreen::Devices
     }
+}
+
+#[cfg(target_os = "linux")]
+fn run_wired(screen: &Renderer, pad: &mut Pad) -> Result<(), String> {
+    wired::session(screen, pad)
+}
+
+/// The host build has no configfs or FunctionFS. It only compiles the menu and
+/// view code, so reaching this arm is a development mistake, not a device path.
+#[cfg(not(target_os = "linux"))]
+fn run_wired(_screen: &Renderer, _pad: &mut Pad) -> Result<(), String> {
+    Err("USB wired mode is only available on the device".into())
 }
 
 pub(crate) fn run() -> Result<(), String> {
@@ -91,6 +115,13 @@ pub(crate) fn run() -> Result<(), String> {
             SessionOutcome::Retry => {
                 connect = None;
                 start = StartScreen::Devices;
+            }
+            SessionOutcome::Wired => {
+                run_wired(&screen, &mut pad)?;
+                // The wired mode did not change the Bluetooth profile or the
+                // last host; Devices reopens with a fresh Bluetooth session.
+                connect = None;
+                start = StartScreen::Restarting;
             }
         }
     }

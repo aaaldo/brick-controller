@@ -152,11 +152,13 @@ impl Settings {
         }
     }
 
-    /// Devices always ends with "Pair a new device", even while a host is
-    /// connected: connecting and pairing are explicit choices on this screen.
+    /// Devices ends with pairing and the wired PC mode, even while a host is
+    /// connected: connecting, pairing and switching transport are explicit
+    /// choices on this screen.
     pub fn rows(&self) -> Vec<MenuRow> {
         let mut rows: Vec<MenuRow> = (0..self.hosts.len()).map(MenuRow::Host).collect();
         rows.push(MenuRow::Pair);
+        rows.push(MenuRow::Wired);
         rows
     }
 

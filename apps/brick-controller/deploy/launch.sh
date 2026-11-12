@@ -4,7 +4,8 @@
 # NextUI entry point for Brick Controller.
 #
 # The binary owns the framebuffer and takes over Bluetooth for the session.
-# This wrapper is responsible for restoring both on every exit path.
+# The wired PC mode also borrows the ADB USB gadget; this wrapper is responsible
+# for restoring both on every exit path.
 
 DIR=$(dirname "$0")
 DIR=$(cd "$DIR" && pwd)
@@ -86,9 +87,10 @@ BT_WAS_ON=0
 pidof bluetoothd >/dev/null 2>&1 && BT_WAS_ON=1
 
 cleanup() {
-    # Order matters. The binary restores the backlight and its own Bluetooth
-    # daemon first; syncsettings then puts NextUI's shared settings back over
-    # it. Starting bt_init last avoids fighting the binary's own restore.
+    # Order matters. The binary restores the backlight, its own Bluetooth
+    # daemon and the g1 USB gadget first; syncsettings then puts NextUI's shared
+    # settings back over it. Starting bt_init last avoids fighting the binary's
+    # own restore.
     "$DIR/brick-controller" restore >>"$LOG" 2>&1
     if [ -x "$SYNC_SETTINGS" ]; then
         # syncsettings links libmsettings from the NextUI system folder.

@@ -22,9 +22,14 @@ pub enum View {
     Controller {
         host: String,
         profile: &'static str,
+        /// The host is a PC reached over USB, not a Bluetooth link.
+        wired: bool,
     },
     Menu {
         rows: Vec<Row>,
+        /// Whether the selected row is a paired host, and may therefore be
+        /// forgotten. Pairing and the wired mode have nothing to forget.
+        can_forget: bool,
     },
     Profile {
         rows: Vec<Row>,
@@ -34,9 +39,18 @@ pub enum View {
         controller_type: &'static str,
         reconnecting: Option<String>,
     },
+    /// The wired PC mode waiting for a USB host. It reuses the Pairing layout
+    /// with a USB-specific waiting label and no controller-type action.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    WiredWaiting {
+        identity: String,
+        controller_type: &'static str,
+    },
     Error {
         title: String,
         message: String,
+        /// True when B returns to the previous screen instead of quitting.
+        back: bool,
     },
     /// A model this build cannot drive yet. Unlike `Error`, there is nothing
     /// to retry: the only action is to quit and keep NextUI's Bluetooth alive.
@@ -66,25 +80,33 @@ pub fn draw(
     canvas.clear(theme.background);
     match view {
         View::Splash { message } => draw_splash(canvas, fonts, theme, lang, message, phase),
-        View::Controller { host, profile } => {
+        View::Controller {
+            host,
+            profile,
+            wired,
+        } => {
             header(canvas, fonts, theme, status, tr(lang, Key::Connected));
-            draw_controller(canvas, fonts, theme, lang, host, profile);
+            draw_controller(canvas, fonts, theme, lang, host, profile, *wired);
             disconnect_hint(canvas, fonts, theme, lang);
         }
-        View::Menu { rows } => {
+        View::Menu { rows, can_forget } => {
             header(canvas, fonts, theme, status, tr(lang, Key::Devices));
             rows_at(canvas, fonts, theme, rows, 120);
+            let mut actions = Vec::new();
+            if *can_forget {
+                actions.push(item("X", tr(lang, Key::Forget)));
+            }
+            actions.push(item("A", tr(lang, Key::Connect)));
             footer(
                 canvas,
                 fonts,
                 theme,
                 &[item("B", tr(lang, Key::Quit))],
-                &[
-                    item("X", tr(lang, Key::Forget)),
-                    item("A", tr(lang, Key::Connect)),
-                ],
+                &actions,
             );
-            if rows.is_empty() {
+            // A blocking popup owns the screen; the empty-list hint would show
+            // through the dimmed background behind it.
+            if rows.is_empty() && modal.is_none() {
                 fonts.draw(
                     canvas,
                     tr(lang, Key::NoPairedDevice),
@@ -112,14 +134,18 @@ pub fn draw(
             reconnecting,
         } => {
             header(canvas, fonts, theme, status, tr(lang, Key::Pairing));
-            draw_pairing(
+            let note = reconnecting
+                .as_deref()
+                .map(|host| fill(tr(lang, Key::ReconnectingTo), &[("host", host)]));
+            draw_waiting(
                 canvas,
                 fonts,
                 theme,
                 lang,
                 identity,
                 controller_type,
-                reconnecting.as_deref(),
+                note.as_deref(),
+                tr(lang, Key::WaitingForHost),
                 phase,
             );
             footer(
@@ -130,14 +156,41 @@ pub fn draw(
                 &[item("X", tr(lang, Key::ChangeControllerType))],
             );
         }
-        View::Error { title, message } => {
+        View::WiredWaiting {
+            identity,
+            controller_type,
+        } => {
+            header(canvas, fonts, theme, status, tr(lang, Key::WiredConnection));
+            draw_waiting(
+                canvas,
+                fonts,
+                theme,
+                lang,
+                identity,
+                controller_type,
+                None,
+                tr(lang, Key::WaitingForUsbHost),
+                phase,
+            );
+            footer(canvas, fonts, theme, &[item("B", tr(lang, Key::Back))], &[]);
+        }
+        View::Error {
+            title,
+            message,
+            back,
+        } => {
             header(canvas, fonts, theme, status, title);
             draw_error(canvas, fonts, theme, message);
+            let back_label = if *back {
+                tr(lang, Key::Back)
+            } else {
+                tr(lang, Key::Quit)
+            };
             footer(
                 canvas,
                 fonts,
                 theme,
-                &[item("B", tr(lang, Key::Quit))],
+                &[item("B", back_label)],
                 &[item("A", tr(lang, Key::Retry))],
             );
         }
@@ -223,15 +276,21 @@ fn draw_controller(
     lang: Lang,
     host: &str,
     profile: &str,
+    wired: bool,
 ) {
     let left = s(canvas, 30);
     let max_w = canvas.width() - left * 2;
     let top = canvas.height() / 2 - s(canvas, 120);
     let host = fonts.ellipsize(host, ITEM_SIZE, max_w);
     fonts.draw(canvas, &host, left, top, ITEM_SIZE, theme.text);
+    let profile_key = if wired {
+        Key::ProfileLineUsb
+    } else {
+        Key::ProfileLine
+    };
     fonts.draw(
         canvas,
-        &fill(tr(lang, Key::ProfileLine), &[("profile", profile)]),
+        &fill(tr(lang, profile_key), &[("profile", profile)]),
         left,
         top + s(canvas, 72),
         HINT_SIZE,
@@ -245,20 +304,22 @@ fn draw_controller(
     }
 }
 
-/// The pairing screen: what the host should see, and how to change it.
+/// The waiting screen shared by Pairing and the wired PC mode.
 ///
-/// `identity` is the Bluetooth name the adapter advertises, while
-/// `controller_type` is the user-facing profile label. They differ by design:
-/// a host lists the emulated controller name, not the app's profile name.
+/// `identity` is the name the host sees, while `controller_type` is the
+/// user-facing profile label. They differ by design: a host lists the emulated
+/// controller name, not the app's profile name. `note` is a ready-to-draw line
+/// carrying the host being reconnected; `waiting` is the label above the bar.
 #[allow(clippy::too_many_arguments)]
-fn draw_pairing(
+fn draw_waiting(
     canvas: &mut Canvas,
     fonts: &mut Fonts,
     theme: &Theme,
     lang: Lang,
     identity: &str,
     controller_type: &str,
-    reconnecting: Option<&str>,
+    note: Option<&str>,
+    waiting: &str,
     phase: f32,
 ) {
     let centre = canvas.width() / 2;
@@ -266,11 +327,7 @@ fn draw_pairing(
     let bar_h = s(canvas, 18);
     let hint_line = s(canvas, HINT_SIZE as i32);
     let block_gap = s(canvas, 64);
-    let reconnect_h = if reconnecting.is_some() {
-        s(canvas, 44)
-    } else {
-        0
-    };
+    let note_h = if note.is_some() { s(canvas, 44) } else { 0 };
 
     // Centre the block between the header and the footer. The identity is the
     // only large, main-colour line; the type and waiting labels share the same
@@ -280,7 +337,7 @@ fn draw_pairing(
     let footer_top = canvas.height() - s(canvas, 30) - s(canvas, 90);
     let type_baseline = s(canvas, 130);
     let lower_top = type_baseline + hint_line + block_gap;
-    let block_h = lower_top + reconnect_h + s(canvas, 20) + bar_h;
+    let block_h = lower_top + note_h + s(canvas, 20) + bar_h;
     let start = (header_bottom + footer_top) / 2 - block_h / 2 + s(canvas, 12);
 
     fonts.draw_centred(
@@ -309,25 +366,11 @@ fn draw_pairing(
     );
 
     let lower_y = start + lower_top;
-    if let Some(host) = reconnecting {
-        fonts.draw_centred(
-            canvas,
-            &fill(tr(lang, Key::ReconnectingTo), &[("host", host)]),
-            centre,
-            lower_y,
-            SMALL_SIZE,
-            hint_text(theme),
-        );
+    if let Some(note) = note {
+        fonts.draw_centred(canvas, note, centre, lower_y, SMALL_SIZE, hint_text(theme));
     }
-    let wait_y = lower_y + reconnect_h;
-    fonts.draw_centred(
-        canvas,
-        tr(lang, Key::WaitingForHost),
-        centre,
-        wait_y,
-        HINT_SIZE,
-        hint_text(theme),
-    );
+    let wait_y = lower_y + note_h;
+    fonts.draw_centred(canvas, waiting, centre, wait_y, HINT_SIZE, hint_text(theme));
     loading_bar(
         canvas,
         theme,

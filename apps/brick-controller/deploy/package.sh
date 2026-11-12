@@ -30,6 +30,14 @@ BRICK_CONTROLLER_VERSION="$VERSION" "$CARGO" build --release --target "$TARGET" 
 BINARY="$ROOT/target/$TARGET/release/brick-controller"
 [ -x "$BINARY" ] || { echo "missing $BINARY" >&2; exit 1; }
 
+# Development builds use an official pid.codes test PID. A release archive must
+# carry the assigned product PID, otherwise every host sees a different device
+# after the switch.
+if grep -q 'pub const USB_PRODUCT: u16 = 0x0002;' src/usb.rs; then
+    echo "warning: wired USB uses the pid.codes test PID 0x0002" >&2
+    echo "warning: replace USB_PRODUCT before publishing this archive" >&2
+fi
+
 STAMP="$(date +%Y%m%d-%H%M%S)"
 STAGE="$DIST/stage-$STAMP/$PAK"
 mkdir -p "$STAGE"

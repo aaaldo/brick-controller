@@ -3,8 +3,9 @@
 ## Projet
 
 Brick as Controller transforme une **TrimUI Brick sous NextUI** en manette
-Bluetooth HID pour PC, Mac, Linux/SteamOS, Android et iPadOS. Le projet est un
-**pak NextUI** : aucune modification du cœur de NextUI n'est nécessaire.
+HID Bluetooth et USB filaire (PC) pour PC, Mac, Linux/SteamOS, Android et
+iPadOS. Le projet est un **pak NextUI** : aucune modification du cœur de NextUI
+n'est nécessaire.
 
 Base technique : **Padpod** (Rust, GPL-3) pour le rôle HID Bluetooth.
 
@@ -28,8 +29,11 @@ Périmètre actuel :
   jeu de boutons est neutralisé vers l'hôte pendant ces écrans. Start et Select
   restent des boutons de manette.
   Dans l'écran Devices, **B** quitte immédiatement l'application, sans confirmation.
-- **USB HID** : hors périmètre du MVP. Le noyau stock de la Brick ne compile
-  probablement pas `f_hid` ; le Bluetooth est la voie principale.
+- **USB HID filaire** : mode **PC uniquement**, sur le port USB-C inférieur.
+  Le noyau stock ne compile pas `f_hid` : le transport utilise FunctionFS et
+  reprend temporairement le gadget `g1` d'ADB, restauré à la sortie. Les profils
+  Xbox, PlayStation et Switch restent Bluetooth. Le mode filaire est accessible
+  depuis Devices, donc après démarrage de la session Bluetooth.
 - **Installation** : manuelle d'abord ; documentation Pak Store préparée ensuite.
 
 ## Règles générales
@@ -151,7 +155,8 @@ apps/brick-controller/
 │   │   ├── session.rs              # machine à états d'une session Bluetooth
 │   │   ├── settings.rs             # hôtes, profil par hôte, mode, hôte courant
 │   │   ├── tests.rs                # tests de navigation et aperçus
-│   │   └── view_model.rs           # Screen -> ui::View
+│   │   ├── view_model.rs           # Screen -> ui::View
+│   │   └── wired.rs                # session filaire PC, Linux uniquement
 │   ├── profiles.rs                 # Profile, ProfileSpec, Controller
 │   ├── profiles/
 │   │   ├── spec.rs                 # métadonnées statiques et registre ALL
@@ -169,6 +174,12 @@ apps/brick-controller/
 │   │   ├── bluez.rs                # D-Bus BlueZ
 │   │   ├── l2cap.rs                # sockets L2CAP
 │   │   └── sdp.rs                  # enregistrement SDP
+│   ├── usb.rs                      # transport HID filaire, réexports
+│   ├── usb/
+│   │   ├── control.rs              # requêtes HID pures
+│   │   ├── ffs.rs                  # descripteurs FunctionFS
+│   │   ├── snapshot.rs             # sauvegarde de g1 avant reprise
+│   │   └── gadget.rs               # configfs, g1, FunctionFS, restauration (Linux)
 │   ├── platform.rs
 │   ├── platform/
 │   │   ├── display.rs              # rétroéclairage
@@ -209,6 +220,7 @@ protocole et ses notices doivent être conservés, pas réécrits.
 | `app/session.rs` | machine à états, lien Bluetooth, extinction, filtrage des entrées | connaître les détails d'un protocole |
 | `app/settings.rs` | hôtes, profil par hôte, `mode`, hôte courant | lire l'écran ou le pad |
 | `app/view_model.rs` | `Screen`/`Settings` -> `ui::View` | dessiner |
+| `app/wired.rs` | session filaire PC, attente, rapports USB, extinction, maintien | connaître BlueZ, les autres profils ou les écrans Bluetooth |
 | `profiles/spec.rs` | `Profile`, `ProfileSpec`, `ALL`, clés, DeviceID | encoder un rapport |
 | `profiles/codec.rs` | `Codec`, `AnyCodec`, `Controller`, `Reports`, `Output` | faire des E/S |
 | `profiles/<protocole>.rs` | identité, descripteur, rapports, sorties, tests | importer `bluez`, `l2cap`, `ui` ou `app` |
@@ -216,6 +228,7 @@ protocole et ses notices doivent être conservés, pas réécrits.
 | `i18n.rs` | `Lang`, `Key`, catalogue des chaînes visibles, `tr` et `fill` | faire des E/S ou connaître `Profile` |
 | `input.rs` | `PadState`, `Button`, `Hat`, état neutre | lire evdev |
 | `bluetooth/*` | BlueZ, L2CAP, SDP, `Address` | connaître les profils |
+| `usb/*` | FunctionFS HID, configfs, reprise et restauration de `g1`, requêtes HID | connaître `Profile`, `bluez` ou l'interface |
 | `platform/*` | écran, moteur, batterie, thème, evdev | connaître les profils |
 | `ui/*` | thème, widgets, écrans, rendu, aperçus | connaître `Profile` ou `Settings` |
 | `test_support.rs` | analyse de descripteur, helpers de test | être compilé hors des tests |
@@ -299,9 +312,10 @@ pub struct Output {
 
 ```text
 main -> app
-app  -> profiles, bluetooth, platform, ui, input, i18n
+app  -> profiles, bluetooth, usb, platform, ui, input, i18n
 profiles -> input, hid, bluetooth::address
 bluetooth -> address
+usb -> paths (numéro de série), std, libc (gadget Linux)
 ui -> platform::status (données uniquement), i18n
 platform -> OS
 hid -> std
@@ -315,6 +329,10 @@ i18n -> std
   des lignes.
 - `bluetooth` ne connaît pas les profils ; `app` lui passe le nom et le
   descripteur.
+- `usb` ne connaît ni `Profile`, ni `bluez`, ni `ui` ; `app/wired.rs` lui passe
+  le nom de produit, le descripteur de rapport et les octets du rapport courant.
+  Seul `usb/gadget.rs` est Linux-only et touche configfs/FunctionFS ;
+  `control.rs`, `ffs.rs` et `snapshot.rs` restent purs et testés sur l'hôte.
 - Toute chaîne visible passe par `i18n::tr` et `i18n::fill`. Les journaux, les
   identités Bluetooth, les marques de profils et les libellés imprimés sur les
   touches restent en anglais.
@@ -501,10 +519,10 @@ Règles :
 
 - **PC** : HID générique, compatible Windows, Linux/SteamOS, Android et les
   applications Mac/iPad qui lisent le HID directement (Steam par exemple).
-  Profil par défaut. macOS n'expose pas un pad HID générique à GameController :
-  il n'apparaît ni dans Réglages Système > Manettes, ni dans les jeux qui
-  utilisent ce framework. Sur un hôte Apple, utiliser Xbox, PlayStation ou
-  Switch.
+  Profil par défaut. C'est aussi le seul profil disponible en filaire. macOS
+  n'expose pas un pad HID générique à GameController : il n'apparaît ni dans
+  Réglages Système > Manettes, ni dans les jeux qui utilisent ce framework. Sur
+  un hôte Apple, utiliser Xbox, PlayStation ou Switch.
 - **Xbox** : identité Xbox Wireless Controller (`045E:02FD`), nom Bluetooth
   « Brick Controller (Xbox) », pour XInput sous Windows et la prise en charge
   Xbox native sur macOS, iPadOS et Android.
@@ -540,11 +558,12 @@ Règles :
   partir de leurs rapports de sortie respectifs. Le mode PC n'a pas de rapport
   de sortie : aucune vibration.
 - Start et Select sont envoyés à l'hôte comme boutons de manette.
-- L'écran **Devices** est l'écran d'accueil. Il liste toujours les hôtes appairés
-  puis **Pair a new device**, même lorsqu'un hôte est connecté. Son footer
-  propose **B Quit**, **X Forget** et **A Connect**. Oublier un hôte demande
-  toujours confirmation. Il n'y a plus d'écran de détail ni de changement de
-  type de contrôleur pour un hôte déjà appairé.
+- L'écran **Devices** est l'écran d'accueil. Il liste toujours les hôtes appairés,
+  puis **Pair a new device**, puis **Wired connection**, même lorsqu'un hôte est
+  connecté. Son footer propose **B Quit**, **X Forget** et **A Connect** ;
+  **X Forget** n'est affiché que sur une ligne d'hôte, jamais sur Pairing ni
+  Wired. Oublier un hôte demande toujours confirmation. Il n'y a plus d'écran de
+  détail ni de changement de type de contrôleur pour un hôte déjà appairé.
 - Aucune connexion n'est automatique : au lancement, aucune adresse enregistrée
   n'est contactée. Ouvrir Devices coupe la connexion en cours, la tentative de
   connexion et l'appairage en cours (cible du reconnecteur effacée, discoverable
@@ -596,6 +615,44 @@ Règles :
   centrés pour rester compatible. Sur Brick Pro, les deux sticks et les clics
   L3/R3 sont réels et alimentent le même état `PadState`.
 
+### Mode filaire PC
+
+- Le mode filaire est **PC uniquement** et utilise le port USB-C **inférieur**.
+  Le port supérieur est un port hôte.
+- Il est accessible depuis Devices : `A` sur **Wired connection** arrête la
+  session Bluetooth, rend BlueZ au système, puis lance `app/wired.rs`.
+- Le noyau stock n'a pas `f_hid` : le transport utilise FunctionFS et reprend
+  `g1`, le gadget ADB, pour la session. Un seul gadget configfs est possible :
+  `g1` est sauvegardé (identité, chaînes, liens de `configs/c.1`) dans
+  `/tmp/brick-controller-usb`, puis restauré à la sortie.
+- ADB est indisponible pendant toute la session filaire. Un crash est réparé par
+  `brick-controller restore`, appelé par `launch.sh`, qui restaure `g1` avant de
+  relancer Bluetooth ; un redémarrage reste le recours ultime.
+- Interface HID : un seul endpoint interrupt IN de 64 octets, descripteur HID de
+  9 octets, descripteur de rapport PC de 75 octets, rapport de 9 octets sans
+  report ID. Pas d'endpoint OUT : l'UDC sunxi rejette l'interrupt OUT et le bulk
+  OUT bloque au débinding.
+- Identité : `0x1209` (pid.codes) et le PID de test `0x0002` en développement,
+  produit `Brick Controller (PC)`, `bcdDevice 0x0100`. Une seule constante
+  `USB_PRODUCT` dans `usb.rs` doit être remplacée par le PID attribué avant une
+  release. Ne jamais publier de `.pak` de release avec le PID de test.
+- Numéro de série stable stocké dans `$BRICK_CONTROLLER_DATA/usb-serial`, jamais
+  le numéro de série du SoC.
+- Écran d'attente : layout de Pairing avec en-tête **Wired connection**,
+  `VISIBLE AS`, `Brick Controller (PC)`, `PC`, « Waiting for USB host… », barre
+  indéterminée et footer **B Back**.
+- `FUNCTIONFS_ENABLE` passe à l'écran **Connected** filaire : hôte `PC (USB)`,
+  ligne `Profile PC · USB HID`, extinction après 10 s et réveil inchangés.
+  `FUNCTIONFS_DISABLE` revient à l'attente.
+- Menu+Start maintenu 1 s envoie un rapport neutre et revient à Devices ; B
+  revient à Devices depuis l'attente. Les rapports restent neutres pendant le
+  maintien et jusqu'au relâchement des touches utilisées avant la connexion.
+- Le retour relance la session Bluetooth avec la popup **Returning to Devices…**
+  (composant de chargement commun), puis rouvre Devices. Le profil Bluetooth
+  actif et le fichier `mode` ne changent pas.
+- En cas d'échec USB, l'écran d'erreur utilise `UsbActivationError`, avec
+  **A Retry** et **B Back**.
+
 Hôtes : macOS, Windows, Linux/SteamOS, Android, iPadOS. Un hôte mémorise
 l'identité de la manette au premier appairage et l'appareil la réutilise pour
 le reconnecter. Pour changer cette identité, il faut oublier l'hôte des deux
@@ -607,10 +664,14 @@ Après toute modification de code source :
 
 1. `cargo fmt --all`
 2. `cargo clippy --workspace --all-targets -- -D warnings`
-3. `cargo test --workspace`
-4. `cargo build --release --target aarch64-unknown-linux-musl -p brick-controller`
-5. packaging du `.pak`, puis `./scripts/check-pak.sh v1.0.0`
-6. test sur le Brick ou le Brick Pro
+3. `cargo clippy --target aarch64-unknown-linux-musl --workspace --all-targets -- -D warnings`
+4. `cargo test --workspace`
+5. `cargo build --release --target aarch64-unknown-linux-musl -p brick-controller`
+6. packaging du `.pak`, puis `./scripts/check-pak.sh v1.0.0`
+7. test sur le Brick ou le Brick Pro
+
+L'étape 3 est indispensable au mode filaire : `usb/gadget.rs` et `app/wired.rs`
+ne sont compilés que pour la cible Linux.
 
 Si une image Docker est utilisée pour l'outillage ou le firmware, la
 reconstruire avant le test.
@@ -626,7 +687,12 @@ reconstruire avant le test.
 - SDP et canaux L2CAP ;
 - sous-commandes Switch, réponses 0x21 et lecture SPI ;
 - mapping des boutons et des axes ;
-- restauration Bluetooth et chemins de secours.
+- restauration Bluetooth et chemins de secours ;
+- transport filaire : blocs FunctionFS (compte des descripteurs, FS/HS),
+  descripteur HID, requêtes `GET_DESCRIPTOR`/`GET_REPORT`/`SET_REPORT`,
+  round-trip du snapshot `g1` ;
+- menu Devices : ordre hôtes/Pair/Wired, `X Forget` conditionnel, vues
+  d'attente et de connexion filaire, popup de retour.
 
 ### Tests sur matériel
 
@@ -662,6 +728,15 @@ reconstruire avant le test.
   et reconnexion ;
 - sortie propre et restauration NextUI ;
 - crash de l'application et récupération ;
+- mode filaire : **Wired connection** sous Pair, `X Forget` masqué sur Pair et
+  Wired, écran d'attente câble débranché, bascule vers **Connected** au
+  branchement d'un PC, boutons/sticks/gâchettes, retour à l'attente au
+  débranchement ;
+- mode filaire : Menu+Start maintenu 1 s, rapport neutre, popup
+  **Returning to Devices…**, retour à Devices et reprise Bluetooth ;
+- mode filaire : ADB restauré à la sortie, puis après un crash et un `restore` ;
+- mode filaire : Windows, Linux/SteamOS et Steam sous macOS ; absence attendue
+  dans GameController macOS/iPadOS ;
 - Bluetooth désactivé au lancement ;
 - audio Bluetooth connecté avant la session ;
 - mise à jour NextUI puis nouveau test.
@@ -693,11 +768,24 @@ Logs utiles : `$LOGS_PATH/BrickController.txt`, `dmesg`, `btmon`,
 | `utils.rs` ou `common.rs` | Dépôt fourre-tout, dépendances illisibles | Module nommé par domaine |
 | Analyseur de descripteur recopié par profil | Tests qui divergent et faux positifs | `test_support::descriptor` |
 | Logique d'écran dans `profiles` | Profil dépendant de l'interface | `app::view_model` |
+| Créer un second gadget configfs | Échec sur `android0`, transport impossible | Reprendre `g1` et le restaurer |
+| Endpoint OUT dans le profil filaire | `ENOTSUPP` ou débinding bloqué, Brick à redémarrer | Endpoint interrupt IN seul |
+| Modifier `g1` sans snapshot | ADB et identité perdus après un crash | Marqueur `/tmp`, `restore`, liens absolus |
+| PID de test dans une release | L'hôte voit un nouvel appareil après le changement | PID attribué dans `USB_PRODUCT` |
+| Tester le filaire sans la cible Linux | `usb/gadget.rs` et `app/wired.rs` non compilés | `cargo clippy --target aarch64-unknown-linux-musl` |
 
 ## Sécurité et récupération
 
 - Toujours vérifier après la sortie que `bluetoothd` et `bluealsa` sont dans
   l'état attendu.
+- Après une session filaire, vérifier que `g1` est rebindé et qu'ADB répond ;
+  `restore` doit restaurer l'identité et les liens avant de relancer Bluetooth.
+- Si l'hôte ne voit plus la Brick après plusieurs réénumérations, débrancher et
+  rebrancher le câble USB-C avant de conclure à un échec du gadget : certains
+  hôtes ne réénumèrent pas d'eux-mêmes alors que la Brick est restaurée.
+- Ne jamais laisser un gadget USB HID en place après un crash : le marqueur
+  `/tmp/brick-controller-usb` et la sous-commande `restore` sont la voie de
+  récupération.
 - Ne jamais laisser la Brick avec le Bluetooth arrêté.
 - Ne jamais écrire dans `.system/`.
 - Ne jamais supprimer un fichier ou un volume sans accord humain.
@@ -734,12 +822,14 @@ Le README doit couvrir :
 - activation du Bluetooth dans NextUI ;
 - appairage macOS/Windows/Linux/Android/iPadOS ;
 - profils de manette par hôte (PC, Xbox, puis PlayStation et Switch) ;
-- limite « Bluetooth uniquement » ;
+- mode filaire PC : port USB-C inférieur, câble de données, ADB indisponible,
+  limite Apple (pas de GameController), PID de test en développement ;
+- limite « Bluetooth uniquement » pour les profils Xbox, PlayStation et Switch ;
 - absence de sticks/gyro/trackpads sur Brick standard, sticks Hall et L3/R3
   réels sur Brick Pro ;
 - partage d'antenne Wi-Fi/Bluetooth ;
 - audio Bluetooth indisponible pendant la session ;
-- procédure de récupération si le Bluetooth reste arrêté ;
+- procédure de récupération si le Bluetooth ou ADB reste arrêté ;
 - crédits et licence.
 
 Un `pak.json` sera ajouté plus tard pour le Pak Store, avec `name`, `version`,
@@ -764,7 +854,11 @@ Le merge et le push restent soumis à approbation humaine.
   Xbox par hôte.
 - **Phase 1b** : profils PlayStation (DualShock 4) et Switch (Pro Controller)
   par hôte.
+- **Phase 1c** : mode filaire **PC uniquement** via FunctionFS et reprise de
+  `g1`, identité pid.codes. Les profils PlayStation, Switch et Xbox restent
+  Bluetooth : l'UDC sunxi n'accepte pas l'endpoint interrupt OUT nécessaire.
 - **Phase 2** : Smart Pro (`tg5040`, 1280×720).
 - **Phase 3** : Smart Pro S `tg5050`.
 - **Phase 4** : H700, si nécessaire.
-- **Recherche séparée** : USB HID (`f_hid`, FunctionFS ou module noyau).
+- **Recherche séparée** : endpoint OUT de l'UDC sunxi (`f_hid` ou correctif
+  noyau), si un mode filaire PlayStation devient une exigence.

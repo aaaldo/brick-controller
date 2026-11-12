@@ -48,6 +48,22 @@ pub struct Modal {
     pub loading: bool,
 }
 
+impl Modal {
+    /// A blocking popup with an indeterminate bar and no actions.
+    ///
+    /// The session changes it when the work finishes; the user cannot dismiss
+    /// it. Used for every in-app transition that must not be interrupted.
+    pub fn loading(title: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            message: String::new(),
+            confirm: "",
+            destructive: false,
+            loading: true,
+        }
+    }
+}
+
 /// Draw the visible rows as one continuous list.
 ///
 /// Scrolling is decided by `view_for`, which keeps the selected row in a

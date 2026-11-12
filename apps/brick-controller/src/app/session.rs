@@ -10,10 +10,10 @@
 
 use super::settings::{remember_profile, save_host, save_mode, save_profiles, Settings};
 use super::view_model::{
-    changing_type_modal, modal_view, move_cursor, nav_dir, view_for, Dir, MenuRow, ModalState,
-    Screen,
+    changing_type_modal, modal_view, move_cursor, nav_dir, returning_to_devices_modal, view_for,
+    wired_waiting, Dir, MenuRow, ModalState, Screen,
 };
-use super::StartScreen;
+use super::{StartScreen, DISCONNECT_HOLD, SCREEN_OFF_AFTER};
 use crate::bluetooth::{
     bluez,
     l2cap::{Channel, Listener},
@@ -32,12 +32,8 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-const DISCONNECT_HOLD: Duration = Duration::from_millis(1000);
 /// How long the blocking "Connecting to…" popup waits before giving up.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
-/// After a host connects, the panel stays on this long, then goes dark until
-/// Menu+Start is pressed once.
-const SCREEN_OFF_AFTER: Duration = Duration::from_secs(10);
 /// Idle poll interval while the panel is off; nothing needs animation then.
 const SCREEN_OFF_POLL: i32 = 250;
 /// Between attempts to reach the host we were last paired with.
@@ -137,6 +133,9 @@ pub(crate) enum SessionOutcome {
         pairing: bool,
     },
     Retry,
+    /// The user chose the wired PC mode. The Bluetooth session is already
+    /// stopped, so the transport and the adapter are free for USB.
+    Wired,
 }
 
 /// Release every button the host may still see held, in the profile's format.
@@ -270,6 +269,19 @@ pub(crate) fn session(
             modal: Some(changing_type_modal(lang)),
             hold: None,
         });
+    } else if start == StartScreen::Restarting {
+        // Returning from wired mode: the USB gadget is already restored, and
+        // the popup covers the Bluetooth restart. Devices is drawn empty
+        // underneath, so the popup does not sit over a stale wired screen.
+        show_frame(
+            screen,
+            lang,
+            View::Menu {
+                rows: Vec::new(),
+                can_forget: false,
+            },
+            Some(returning_to_devices_modal(lang)),
+        );
     }
 
     let daemon = match bluez::Daemon::take_over(profile.bt_name(), profile.device_id()) {
@@ -801,6 +813,16 @@ pub(crate) fn session(
                                             }
                                         }
                                         MenuRow::Pair => state = Screen::Pairing { back: true },
+                                        // Show the wired waiting screen now:
+                                        // restoring the system Bluetooth
+                                        // daemon takes several seconds, and
+                                        // the renderer thread can animate the
+                                        // bar meanwhile. The USB transport
+                                        // starts after this session returns.
+                                        MenuRow::Wired => {
+                                            show_frame(screen, lang, wired_waiting(), None);
+                                            break 'session SessionOutcome::Wired;
+                                        }
                                     }
                                     drawn = None;
                                 }
@@ -1085,5 +1107,6 @@ fn error_view(lang: Lang, error: &str) -> View {
     View::Error {
         title: tr(lang, Key::ErrorTitle).into(),
         message,
+        back: false,
     }
 }
