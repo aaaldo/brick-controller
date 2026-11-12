@@ -1,8 +1,8 @@
 // Copyright 2026 the Brick Controller contributors
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! The Brick's hardware: evdev input, backlight, rumble motor and status
-//! readings.
+//! The TrimUI `tg5040` hardware: evdev input, backlight, rumble motor and
+//! status readings.
 //!
 //! This is the imperative shell. Everything here may touch the filesystem,
 //! libc or sysfs; profiles and the pure `input` module never do. A missing
@@ -11,6 +11,7 @@
 
 pub mod display;
 pub mod input_trimui;
+pub mod model;
 pub mod rumble;
 pub mod status;
 

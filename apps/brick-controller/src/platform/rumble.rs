@@ -11,7 +11,12 @@
 //! within a 20 ms cycle, on for that share of it. A coin motor cannot follow
 //! 50 Hz, so the cycle reads as a weaker or stronger buzz rather than as
 //! pulses.
+//!
+//! The Brick Pro shares the same GPIO but its driver runs at 3.3 V, which
+//! NextUI caps at 2.5 V because the stronger setting feels unpleasant on that
+//! shell. Since this app drives the pin directly, it applies the same cap.
 
+use super::model::Model;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -19,6 +24,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const GPIO: &str = "/sys/class/gpio/gpio227/value";
+const VOLTAGE: &str = "/sys/class/motor/voltage";
 const CYCLE: Duration = Duration::from_millis(20);
 /// Below this the motor would only twitch; it stays off.
 const LEAST: u8 = 12;
@@ -38,12 +44,24 @@ pub fn on_time(level: u8) -> Duration {
     }
 }
 
+fn set_voltage(value: u32) {
+    if let Ok(mut file) = OpenOptions::new().write(true).open(VOLTAGE) {
+        let _ = write!(file, "{value}");
+    }
+}
+
 impl Rumble {
     /// None when the pin is not there (another device, or spruce never
     /// exported it): the gamepad works the same, without rumble.
     pub fn open() -> Option<Self> {
         let mut file = OpenOptions::new().write(true).open(GPIO).ok()?;
         let _ = file.write_all(b"0");
+        let model = Model::current();
+        set_voltage(model.rumble_voltage());
+        eprintln!(
+            "rumble: {model:?}, motor voltage {} uV",
+            model.rumble_voltage()
+        );
         let level = Arc::new(AtomicU8::new(0));
         let running = Arc::new(AtomicBool::new(true));
         let (l, r) = (Arc::clone(&level), Arc::clone(&running));
@@ -92,6 +110,10 @@ impl Drop for Rumble {
         if let Some(t) = self.thread.take() {
             let _ = t.join();
         }
+        // Leave the driver at its idle voltage rather than at the Brick Pro
+        // cap: NextUI sets the voltage it wants on its next rumble pulse, but
+        // an idle shell should not inherit the 2.5 V session setting.
+        set_voltage(Model::idle_rumble_voltage());
     }
 }
 
@@ -101,6 +123,7 @@ pub fn stop() {
     if let Ok(mut file) = OpenOptions::new().write(true).open(GPIO) {
         let _ = file.write_all(b"0");
     }
+    set_voltage(Model::idle_rumble_voltage());
 }
 
 #[cfg(test)]

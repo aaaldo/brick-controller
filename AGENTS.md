@@ -10,8 +10,8 @@ Base technique : **Padpod** (Rust, GPL-3) pour le rôle HID Bluetooth.
 
 Périmètre actuel :
 
-- **Phase 1** : `tg5040` — Brick standard uniquement.
-- **Phase 2** : autres modèles `tg5040` (Brick Pro, Smart Pro).
+- **Phase 1** : `tg5040` — Brick standard et Brick Pro.
+- **Phase 2** : Smart Pro (`tg5040`, 1280×720).
 - **Phase 3** : `tg5050` (Smart Pro S).
 - **H700** : plus tard, hors périmètre immédiat.
 - **Hôtes** : macOS, Windows, Linux/SteamOS, Android, iPadOS.
@@ -21,8 +21,10 @@ Périmètre actuel :
 - **Navigation de l'app** : écran **Devices** comme accueil sans hôte.
   Menu+Start maintenu 1 s déconnecte et ouvre Devices depuis la vue Connected,
   avec HID neutralisé pendant le maintien ; un appui simple Menu+Start rallume
-  l'écran éteint. F1/F2 ne naviguent pas dans l'interface : elles sont mappées
-  sur L3/R3 et envoyées à l'hôte. Dans les écrans d'interface : D-pad, A, B. Le
+  l'écran éteint. Sur Brick standard, F1/F2 ne naviguent pas dans l'interface :
+  elles sont mappées sur L3/R3 et envoyées à l'hôte. Sur Brick Pro, les clics
+  de sticks sont L3/R3 et les touches Fn ne sont pas mappées. Dans les écrans
+  d'interface : D-pad, A, B. Le
   jeu de boutons est neutralisé vers l'hôte pendant ces écrans. Start et Select
   restent des boutons de manette.
   Dans l'écran Devices, **B** quitte immédiatement l'application, sans confirmation.
@@ -169,7 +171,8 @@ apps/brick-controller/
 │   ├── platform.rs
 │   ├── platform/
 │   │   ├── display.rs              # rétroéclairage
-│   │   ├── rumble.rs               # moteur
+│   │   ├── model.rs                # Brick / Brick Pro / Smart Pro
+│   │   ├── rumble.rs               # moteur et tension Brick Pro
 │   │   ├── status.rs               # batterie, charge, Wi-Fi, horloge
 │   │   ├── input_trimui.rs         # evdev TrimUI
 │   │   ├── input_h700.rs           # phase 4, prévu
@@ -436,14 +439,14 @@ Ne **jamais** installer dans `.system/` : ce dossier est remplacé à chaque mis
 - Certains modèles H700 n'ont pas de Bluetooth : détecter et afficher un
   message clair.
 
-## Matériel — Brick standard
+## Matériel — Brick standard et Brick Pro
 
 Sonde validée sur NextUI `NextUI-20261013-0`, noyau `4.9.191` :
 
 - Écran : **1024×768**, framebuffer **32 bpp BGRA**, double buffer.
 - Entrées : `TRIMUI Player1` sur `/dev/input/event3`, avec `ABS_X/Y/RX/RY`
   centrés, `ABS_Z/RZ` 0..255 et `ABS_HAT0X/Y`.
-- Pas de sticks analogiques.
+- Pas de sticks analogiques sur le Brick standard.
 - F1/F2 : touches de manette mappées sur L3/R3, jamais utilisées pour la
   navigation de l'app. Menu+Start maintenu 1 s déconnecte et ouvre Devices ; le
   même combo, appuyé une fois, rallume l'écran. Dans les écrans d'interface, le
@@ -460,6 +463,28 @@ Sonde validée sur NextUI `NextUI-20261013-0`, noyau `4.9.191` :
   `bluealsa` actif, `hciattach -n ttyS1 xradio`, `hciconfig` et `btmgmt`
   disponibles, `systemctl` absent.
 
+### Brick Pro
+
+Le Brick Pro est un appareil `tg5040` : même écran 1024×768, même
+rétroéclairage `/dev/disp`, même GPIO 227, même batterie et même Bluetooth. Il
+ajoute :
+
+- deux sticks Hall-effect, avec `ABS_X/Y/RX/RY` réels ;
+- de vrais clics L3/R3 sur les codes 317/318, alors que le Brick standard y
+  mappe ses touches F1/F2 ;
+- des touches Fn gauche/droite sur `KEY_F1`/`KEY_F2` (59/60), hors plage
+  gamepad et volontairement non mappées ;
+- pas de bouton Home distinct : Menu reste le bouton Home/Guide ;
+- un pilote de moteur 3,3 V que NextUI plafonne à **2,5 V** pour le confort.
+  `platform/model.rs` lit `DEVICE` (`brickpro`) et applique la même limite,
+  puis restaure 3,3 V à la sortie.
+
+`DEVICE=brickpro` et `PLATFORM=tg5040` : le pak s'installe dans
+`Tools/tg5040`, comme sur le Brick standard. Le firmware système est
+`trimui_tg4040`, mais NextUI conserve le dossier de plateforme `tg5040`. Ces
+valeurs viennent de NextUI et de la configuration spruceOS mesurée sur
+matériel ; la validation de ce Pak sur Brick Pro reste à faire.
+
 Règles :
 
 - Ne pas supposer un numéro d'event (`event3` ou `event4`) : trouver le
@@ -467,6 +492,8 @@ Règles :
 - Ne pas supposer 32 bpp : gérer 32 bpp BGRA et 16 bpp RGB565.
 - Ne pas supposer que le rumble, le rétroéclairage ou la batterie existent :
   no-op propre si absent.
+- Ne pas déduire le modèle de la résolution : le Brick et le Brick Pro
+  partagent 1024×768. Lire `DEVICE` pour les différences de tension du moteur.
 - Journaliser les premiers codes evdev inconnus pour faciliter l'adaptation.
 
 ## Profils HID
@@ -508,8 +535,9 @@ Règles :
   « Brick Controller (Xbox) », « Brick Controller (PS4) » ou
   « Brick Controller (Switch) ».
 - Les profils Xbox, PlayStation et Switch pilotent le moteur via
-  `platform/rumble.rs` (GPIO 227) à partir de leurs rapports de sortie
-  respectifs. Le mode PC n'a pas de rapport de sortie : aucune vibration.
+  `platform/rumble.rs` (GPIO 227, tension plafonnée à 2,5 V sur Brick Pro) à
+  partir de leurs rapports de sortie respectifs. Le mode PC n'a pas de rapport
+  de sortie : aucune vibration.
 - Start et Select sont envoyés à l'hôte comme boutons de manette.
 - L'écran **Devices** est l'écran d'accueil. Il liste toujours les hôtes appairés
   puis **Pair a new device**, même lorsqu'un hôte est connecté. Son footer
@@ -529,8 +557,9 @@ Règles :
   (1 s), mode indéterminé animé pour le splash et la connexion.
 - Menu+Start maintenu 1 s déconnecte et ouvre Devices depuis la vue Connected :
   aucun rapport HID n'est envoyé pendant le maintien. Un overlay
-  « Keep holding to disconnect… » montre la progression. F1/F2 ne sortent pas
-  de cette vue ; elles restent des boutons L3/R3 pour l'hôte.
+  « Keep holding to disconnect… » montre la progression. Sur Brick standard,
+  F1/F2 ne sortent pas de cette vue et restent des boutons L3/R3 pour l'hôte.
+  Sur Brick Pro, les clics de sticks sont L3/R3 et les Fn ne sont pas mappées.
 - Dans l'écran Devices, la navigation est celle de NextUI : D-pad, **A** pour
   connecter l'hôte sélectionné (ou ouvrir **Pair a new device**) et **X** pour
   l'oublier. Dans un sous-écran, B revient et A valide. Dans l'écran Devices, B
@@ -563,11 +592,12 @@ Règles :
   Menu+Start est réservé au réveil et à la déconnexion. Dans les écrans
   d'interface, Menu est neutralisé.
 - Sur Brick standard, les sticks sont absents : le descripteur les déclare
-  centrés pour rester compatible.
+  centrés pour rester compatible. Sur Brick Pro, les deux sticks et les clics
+  L3/R3 sont réels et alimentent le même état `PadState`.
 
 Hôtes : macOS, Windows, Linux/SteamOS, Android, iPadOS. Un hôte mémorise
-l'identité de la manette au premier appairage et le Brick la réutilise pour le
-reconnecter. Pour changer cette identité, il faut oublier l'hôte des deux
+l'identité de la manette au premier appairage et l'appareil la réutilise pour
+le reconnecter. Pour changer cette identité, il faut oublier l'hôte des deux
 côtés, choisir l'autre type lors d'un nouvel appairage, puis réappairer.
 
 ## Validation
@@ -579,7 +609,7 @@ Après toute modification de code source :
 3. `cargo test --workspace`
 4. `cargo build --release --target aarch64-unknown-linux-musl -p brick-controller`
 5. packaging du `.pak`
-6. test sur la Brick
+6. test sur le Brick ou le Brick Pro
 
 Si une image Docker est utilisée pour l'outillage ou le firmware, la
 reconstruire avant le test.
@@ -603,7 +633,9 @@ reconstruire avant le test.
 - tous les boutons, D-pad, gâchettes, Start/Select, Menu ;
 - Menu (bouton) : appui simple = Home/Guide, appui long sans effet ;
 - Menu+Start maintenu 1 s déconnecte et ouvre Devices ;
-- F1/F2 sans navigation, envoyées à l'hôte comme L3/R3 ;
+- Brick standard : F1/F2 sans navigation, envoyées à l'hôte comme L3/R3 ;
+- Brick Pro : sticks gauche/droit, clics L3/R3, Fn 59/60 sans effet ;
+- Brick Pro : rumble plafonné à 2,5 V, puis 3,3 V restaurés à la sortie ;
 - maintien Menu+Start : overlay « Keep holding to disconnect… », HID neutralisé ;
 - appui simple Menu+Start sur écran éteint : réveil sans envoi à l'hôte ;
 - navigation Devices/sous-écrans avec D-pad/A/B ;
@@ -645,11 +677,12 @@ Logs utiles : `$LOGS_PATH/BrickController.txt`, `dmesg`, `btmon`,
 | Tuer `hci0` ou `hciattach` | Impossible de reconnecter sans redémarrage | Conserver l'adaptateur actif |
 | Coder `/dev/input/event3` en dur | Mauvais périphérique selon le boot | Chercher par nom/capacités |
 | Supposer 32 bpp | Écran noir ou décalé | Gérer 16 et 32 bpp |
-| Supposer des sticks | UI incohérente sur Brick standard | Détecter les axes |
+| Supposer l'absence de sticks | Les sticks du Brick Pro resteraient centrés | Lire les capacités evdev et les axes |
+| Appliquer 3,3 V au moteur du Brick Pro | Moteur désagréable à forte intensité | Lire `DEVICE` et plafonner à 2,5 V |
 | `unwrap()` sur un chemin matériel optionnel | Crash sur un modèle différent | `Option`/no-op |
 | Modifier `.system/` | Écrasé à la mise à jour NextUI | Utiliser `Tools/tg5040/` |
 | Copier Padpod sans licence/crédits | Violation GPL-3 | Garder LICENSE, credits et source |
-| Tester uniquement sur l'hôte | Bugs de framebuffer/entrées non vus | Tester sur la Brick |
+| Tester uniquement sur l'hôte | Bugs de framebuffer/entrées non vus | Tester sur le Brick ou le Brick Pro |
 | Oublier `sync` après écriture FAT | État corrompu après coupure | `sync` dans le cleanup |
 | Éteindre `/dev/disp` sans mémoriser la luminosité | Écran noir après un crash | Fichier `screen-off`, `restore`, `syncsettings.elf` |
 | Laisser deux instances du Pak | `Address in use`, écran Bluetooth trompeur, entrées partagées | Verrou PID dans `launch.sh`, arrêt de l'instance précédente |
@@ -701,7 +734,8 @@ Le README doit couvrir :
 - appairage macOS/Windows/Linux/Android/iPadOS ;
 - profils de manette par hôte (PC, Xbox, puis PlayStation et Switch) ;
 - limite « Bluetooth uniquement » ;
-- absence de sticks/gyro/trackpads sur Brick standard ;
+- absence de sticks/gyro/trackpads sur Brick standard, sticks Hall et L3/R3
+  réels sur Brick Pro ;
 - partage d'antenne Wi-Fi/Bluetooth ;
 - audio Bluetooth indisponible pendant la session ;
 - procédure de récupération si le Bluetooth reste arrêté ;
@@ -725,11 +759,11 @@ Le merge et le push restent soumis à approbation humaine.
 
 ## Roadmap
 
-- **Phase 1** : Brick standard `tg5040`, Bluetooth, profils PC et Xbox par
-  hôte.
+- **Phase 1** : Brick standard et Brick Pro `tg5040`, Bluetooth, profils PC et
+  Xbox par hôte.
 - **Phase 1b** : profils PlayStation (DualShock 4) et Switch (Pro Controller)
   par hôte.
-- **Phase 2** : Brick Pro et Smart Pro.
+- **Phase 2** : Smart Pro (`tg5040`, 1280×720).
 - **Phase 3** : Smart Pro S `tg5050`.
 - **Phase 4** : H700, si nécessaire.
 - **Recherche séparée** : USB HID (`f_hid`, FunctionFS ou module noyau).
