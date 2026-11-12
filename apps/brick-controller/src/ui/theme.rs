@@ -37,29 +37,36 @@ pub struct Theme {
 
 impl Theme {
     pub fn load() -> Self {
+        nextval_json()
+            .map(|json| Self::from_json(&json))
+            .unwrap_or_else(Self::fallback)
+    }
+
+    /// Build a theme from the JSON returned by NextUI's `nextval.elf`.
+    ///
+    /// Only the colour keys are read. The preview test uses this with a JSON
+    /// captured from the device so its screenshots match the active palette.
+    pub fn from_json(json: &str) -> Self {
         let mut theme = Self::fallback();
-        let Some(json) = nextval_json() else {
-            return theme;
-        };
-        if let Some(color) = json_color(&json, "color1") {
+        if let Some(color) = json_color(json, "color1") {
             theme.highlight = color;
         }
-        if let Some(color) = json_color(&json, "color2") {
+        if let Some(color) = json_color(json, "color2") {
             theme.accent = color;
         }
-        if let Some(color) = json_color(&json, "color3") {
+        if let Some(color) = json_color(json, "color3") {
             theme.button_label = color;
         }
-        if let Some(color) = json_color(&json, "color4") {
+        if let Some(color) = json_color(json, "color4") {
             theme.text = color;
         }
-        if let Some(color) = json_color(&json, "color5") {
+        if let Some(color) = json_color(json, "color5") {
             theme.highlighted_text = color;
         }
-        if let Some(color) = json_color(&json, "color6") {
+        if let Some(color) = json_color(json, "color6") {
             theme.hint = color;
         }
-        if let Some(color) = json_color(&json, "color7").or_else(|| json_color(&json, "bgcolor")) {
+        if let Some(color) = json_color(json, "color7").or_else(|| json_color(json, "bgcolor")) {
             theme.background = color;
         }
         theme
@@ -192,4 +199,30 @@ pub fn font_paths() -> Vec<String> {
         "/mnt/SDCARD/Themes/SPRUCE/nunwen.ttf".into(),
     ]);
     paths
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nextui_colours_fill_the_theme_roles() {
+        let json = r##"{
+            "color1": "0xCBA6F7FF",
+            "color2": "0x181825FF",
+            "color3": "0x1E1E2EFF",
+            "color4": "0xCDD6F4FF",
+            "color5": "0x1E1E2EFF",
+            "color6": "0xA6ADC8FF",
+            "color7": "0x1E1E2EFF"
+        }"##;
+        let theme = Theme::from_json(json);
+        assert_eq!(theme.highlight, Rgb(0xcb, 0xa6, 0xf7));
+        assert_eq!(theme.accent, Rgb(0x18, 0x18, 0x25));
+        assert_eq!(theme.button_label, Rgb(0x1e, 0x1e, 0x2e));
+        assert_eq!(theme.text, Rgb(0xcd, 0xd6, 0xf4));
+        assert_eq!(theme.highlighted_text, Rgb(0x1e, 0x1e, 0x2e));
+        assert_eq!(theme.hint, Rgb(0xa6, 0xad, 0xc8));
+        assert_eq!(theme.background, Rgb(0x1e, 0x1e, 0x2e));
+    }
 }
