@@ -1,6 +1,6 @@
 [package]
 name = "brick"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 publish = false
 description = "What every app here shares on the TrimUI Brick: the panel, text, the pad, screenshots."
