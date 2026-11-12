@@ -100,13 +100,8 @@ fn preview_every_screen() {
         (
             "error",
             View::Error {
-                title: tr(Lang::En, Key::BluetoothOffTitle).into(),
-                message: tr(Lang::En, Key::BluetoothOffMessage).into(),
-                steps: vec![
-                    tr(Lang::En, Key::TurnBluetoothOn).into(),
-                    tr(Lang::En, Key::ReopenApp).into(),
-                ],
-                countdown: Some(fill(tr(Lang::En, Key::ClosingIn), &[("n", "60")])),
+                title: tr(Lang::En, Key::ErrorTitle).into(),
+                message: tr(Lang::En, Key::BluetoothActivationError).into(),
             },
             preview_status(false),
         ),

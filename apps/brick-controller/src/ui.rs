@@ -27,8 +27,6 @@ pub use widgets::{Modal, Row};
 use brick::canvas::{Canvas, Rgb};
 use std::collections::HashMap;
 
-pub const ERROR: Rgb = Rgb(0xfb, 0x49, 0x34);
-
 const HINT_SIZE: f32 = 36.0;
 const SMALL_SIZE: f32 = 30.0;
 const ITEM_SIZE: f32 = 48.0;

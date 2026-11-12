@@ -8,7 +8,7 @@ use super::widgets::{
     draw_hold, draw_key, draw_modal, draw_status, footer, item, key_width, loading_bar, rows_at,
     status_bar_width, Loading, Modal, Row,
 };
-use super::{circle, round_rect, s, ERROR, HINT_SIZE, ITEM_SIZE, SMALL_SIZE, TITLE_SIZE};
+use super::{round_rect, s, HINT_SIZE, ITEM_SIZE, SMALL_SIZE, TITLE_SIZE};
 use crate::i18n::{fill, tr, Key, Lang};
 use crate::platform::StatusInfo;
 use brick::canvas::Canvas;
@@ -37,8 +37,6 @@ pub enum View {
     Error {
         title: String,
         message: String,
-        steps: Vec<String>,
-        countdown: Option<String>,
     },
 }
 
@@ -126,22 +124,9 @@ pub fn draw(
                 &[item("X", tr(lang, Key::ChangeControllerType))],
             );
         }
-        View::Error {
-            title,
-            message,
-            steps,
-            countdown,
-        } => {
+        View::Error { title, message } => {
             header(canvas, fonts, theme, status, title);
-            draw_error(
-                canvas,
-                fonts,
-                theme,
-                lang,
-                message,
-                steps,
-                countdown.as_deref(),
-            );
+            draw_error(canvas, fonts, theme, message);
             footer(
                 canvas,
                 fonts,
@@ -345,69 +330,29 @@ fn draw_pairing(
 
 /// The recovery screen shown when Bluetooth cannot be taken over.
 ///
-/// The numbered steps are deliberately actionable without a terminal: the app
-/// auto-closes so NextUI can restore its own Bluetooth state, hence the
-/// countdown at the bottom.
-#[allow(clippy::too_many_arguments)]
-fn draw_error(
-    canvas: &mut Canvas,
-    fonts: &mut Fonts,
-    theme: &Theme,
-    lang: Lang,
-    message: &str,
-    steps: &[String],
-    countdown: Option<&str>,
-) {
-    let left = s(canvas, 30);
-    let icon_x = left + s(canvas, 56);
-    let icon_y = s(canvas, 208);
-    circle(canvas, icon_x, icon_y, s(canvas, 56), ERROR);
-    circle(canvas, icon_x, icon_y, s(canvas, 50), theme.background);
-    fonts.draw_centred(
-        canvas,
-        "!",
-        icon_x,
-        icon_y + s(canvas, 28),
-        TITLE_SIZE,
-        ERROR,
-    );
-    fonts.draw(
-        canvas,
-        tr(lang, Key::BluetoothUnavailable),
-        left + s(canvas, 140),
-        icon_y - s(canvas, 8),
-        ITEM_SIZE,
-        ERROR,
-    );
-    fonts.draw(
-        canvas,
-        message,
-        left + s(canvas, 140),
-        icon_y + s(canvas, 34),
-        SMALL_SIZE,
-        hint_text(theme),
-    );
-    let mut y = s(canvas, 340);
-    for (i, step) in steps.iter().enumerate() {
-        fonts.draw(
+/// A single hint label is enough here: the footer offers Retry and Quit. The
+/// message uses the same size and colour as the hint labels on the Connected
+/// and Pairing screens, and is centred like the Pairing block.
+fn draw_error(canvas: &mut Canvas, fonts: &mut Fonts, theme: &Theme, message: &str) {
+    let margin = s(canvas, 30);
+    let max_w = canvas.width() - margin * 2;
+    let line_h = s(canvas, 48);
+    let lines = fonts.wrap(message, HINT_SIZE, max_w, 4);
+    let total = lines.len() as i32 * line_h;
+    let header_bottom = s(canvas, 105);
+    let footer_top = canvas.height() - s(canvas, 30) - s(canvas, 90);
+    let mut top = (header_bottom + footer_top - total) / 2;
+    for line in lines {
+        let baseline = fonts.centred_baseline(&line, HINT_SIZE, top + line_h / 2);
+        fonts.draw_centred(
             canvas,
-            &format!("{}. {step}", i + 1),
-            left,
-            y,
-            SMALL_SIZE,
-            theme.text,
-        );
-        y += s(canvas, 50);
-    }
-    if let Some(countdown) = countdown {
-        fonts.draw(
-            canvas,
-            countdown,
-            left,
-            canvas.height() - s(canvas, 154),
-            SMALL_SIZE,
+            &line,
+            canvas.width() / 2,
+            baseline,
+            HINT_SIZE,
             hint_text(theme),
         );
+        top += line_h;
     }
 }
 
