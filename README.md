@@ -16,6 +16,10 @@ iPad. Pair it the way you would pair any other gamepad, then play.
 > Smart Pro and `tg5050` are planned. Bluetooth only; USB HID is not available
 > yet.
 
+> **Found a problem?** Open a bug report from the repository's **Issues** tab
+> and attach the log. [Troubleshooting](#troubleshooting) explains where to
+> find it.
+
 ## What you get
 
 - A real Bluetooth gamepad: D-pad, A/B/X/Y, L1/L2/R1/R2, Start, Select and
@@ -144,6 +148,34 @@ Logs are written to:
 ```text
 /mnt/SDCARD/.userdata/tg5040/logs/BrickController.txt
 ```
+
+The previous run is kept as `BrickController.txt.1` when the log rotates.
+
+### Reporting a bug
+
+Open a bug report from the repository's **Issues** tab, or use the
+[bug report form](../../issues/new/choose). The form asks for the handheld
+model, the NextUI version, the host, the controller type, the steps to
+reproduce the problem and the log.
+
+To retrieve the log:
+
+1. Power off the handheld and remove the SD card.
+2. Connect the card to a computer.
+3. Open the hidden `.userdata` folder at the root of the card:
+   - Windows: in File Explorer, open **View → Show → Hidden items**.
+   - macOS: press **Cmd+Shift+.** in Finder.
+4. Copy `tg5040/logs/BrickController.txt` from `.userdata`.
+
+Attach the file to the issue. If the current log is empty or does not cover
+the problem, attach `BrickController.txt.1` as well.
+
+The log records the Bluetooth names and addresses of the hosts you paired.
+Mask them if you do not want them public.
+
+Include the Pak version, the handheld model, the NextUI version, the host OS,
+the controller type, and what you expected versus what happened. A photo of
+the screen helps when the interface is wrong.
 
 If Bluetooth stays stopped after a crash or a forced exit, reboot the handheld
 or run:

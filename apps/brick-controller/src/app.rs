@@ -20,7 +20,7 @@ use settings::{fallback_profile, profile_for_host, save_mode, saved_host};
 /// The release, as `package.sh` builds it; "dev" for any other build.
 const VERSION: &str = match option_env!("BRICK_CONTROLLER_VERSION") {
     Some(v) => v,
-    None => "0.1.0",
+    None => "dev",
 };
 
 /// Where a session starts after the Bluetooth daemon has been restarted.

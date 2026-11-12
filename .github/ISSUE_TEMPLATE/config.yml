@@ -1,0 +1,3 @@
+# Keep blank issues available for feature requests until a dedicated form
+# exists; the bug report form is still the first choice in the picker.
+blank_issues_enabled: true
