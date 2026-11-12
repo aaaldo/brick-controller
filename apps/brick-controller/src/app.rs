@@ -10,12 +10,17 @@ mod settings;
 mod tests;
 mod view_model;
 
+use crate::i18n::{tr, Key, Lang};
+use crate::input::Button;
 use crate::platform::input_trimui::{pad_path, Pad};
-use crate::ui::{Renderer, Theme};
+use crate::platform::model::Model;
+use crate::platform::StatusInfo;
+use crate::ui::{Frame, Renderer, Theme, View};
 use brick::canvas::Canvas;
 use brick::text::Fonts;
 use session::{session, SessionOutcome};
 use settings::{fallback_profile, profile_for_host, save_mode, saved_host};
+use std::os::unix::io::AsRawFd;
 
 /// The release, as `package.sh` builds it; "dev" for any other build.
 const VERSION: &str = match option_env!("BRICK_CONTROLLER_VERSION") {
@@ -53,6 +58,13 @@ pub(crate) fn run() -> Result<(), String> {
     let fonts = Fonts::load(&crate::ui::font_paths());
     let mut pad = Pad::open(&pad_path()).map_err(|e| format!("pad: {e}"))?;
     let screen = Renderer::spawn(canvas, fonts, theme);
+    // Refuse a model with no layout before touching Bluetooth: the Smart Pro
+    // shares tg5040 with the Brick but has a 1280x720 panel, and a cropped
+    // controller screen would hide the reason nothing works.
+    if !Model::current().is_supported() {
+        show_unsupported(&screen, &mut pad);
+        return Ok(());
+    }
     let mut profile = saved_host()
         .map(profile_for_host)
         .unwrap_or_else(fallback_profile);
@@ -84,4 +96,39 @@ pub(crate) fn run() -> Result<(), String> {
     }
     drop(screen);
     Ok(())
+}
+
+/// Explain that this model has no layout yet and wait for B.
+///
+/// This runs before any Bluetooth takeover, so the handheld keeps NextUI's
+/// daemon and the user gets an actionable message instead of a cropped screen.
+fn show_unsupported(screen: &Renderer, pad: &mut Pad) {
+    let lang = Lang::En;
+    let mut previous = pad.mapper.state;
+    screen.show(Frame {
+        lang,
+        view: View::Unsupported {
+            title: tr(lang, Key::UnsupportedDeviceTitle).into(),
+            message: tr(lang, Key::UnsupportedDeviceMessage).into(),
+        },
+        status: StatusInfo::read(false),
+        modal: None,
+        hold: None,
+    });
+    loop {
+        let mut fd = libc::pollfd {
+            fd: pad.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        unsafe { libc::poll(&mut fd, 1, 200) };
+        if fd.revents & libc::POLLIN != 0 && pad.read().is_ok() {
+            let now = pad.mapper.state;
+            let b = now.pressed(Button::South) && !previous.pressed(Button::South);
+            previous = now;
+            if b {
+                return;
+            }
+        }
+    }
 }

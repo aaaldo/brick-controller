@@ -13,8 +13,8 @@ iPad. Pair it the way you would pair any other gamepad, then play.
 
 > **Status.** The Brick is supported. The Brick Pro uses the same `tg5040`
 > package and code path, but has not yet been validated on Brick Pro hardware.
-> Smart Pro and `tg5050` are planned. Bluetooth only; USB HID is not available
-> yet.
+> Smart Pro and `tg5050` are not supported yet: the app refuses to start on
+> them. Bluetooth only; USB HID is not available yet.
 
 > **Found a problem?** Open a bug report from the repository's **Issues** tab
 > and attach the log. [Troubleshooting](#troubleshooting) explains where to
@@ -54,21 +54,29 @@ iPad. Pair it the way you would pair any other gamepad, then play.
 
 - A TrimUI Brick or Brick Pro running NextUI (`tg5040`).
 - Bluetooth enabled in NextUI.
-- The `Brick Controller.pak` folder.
+- The `Brick Controller.pak` folder, or the release zip.
 
 A USB-C cable is only needed for development over ADB or SSH. Normal use is
 wireless.
 
 ### Install
 
-1. Copy `Brick Controller.pak` to:
+The `v1.0.0` release is being submitted to Pak Store. Until it appears, use the
+manual installation.
+
+#### Manual installation
+
+1. Download the release zip.
+2. Create this folder on the SD card:
 
    ```text
-   /mnt/SDCARD/Tools/tg5040/
+   /mnt/SDCARD/Tools/tg5040/Brick Controller.pak/
    ```
 
-2. Put the SD card back in the handheld.
-3. Open **Tools → Brick Controller**.
+3. Extract the contents of the zip into that folder. `launch.sh` and
+   `brick-controller` must sit directly inside `Brick Controller.pak/`.
+4. Put the SD card back in the handheld.
+5. Open **Tools → Brick Controller**.
 
 The Brick Pro uses the same `tg5040` folder and the same package as the Brick
 standard.
@@ -123,6 +131,8 @@ does not appear in System Settings or in games built on that framework.
 ## Good to know
 
 - **Bluetooth only.** USB HID is not part of this release.
+- The Smart Pro and Smart Pro S are not supported yet. On those models the app
+  shows an unsupported-device screen and exits without taking over Bluetooth.
 - Rumble works in Xbox, PlayStation and Switch modes. The PC profile has no
   output report, so PC hosts do not vibrate the handheld.
 - The Brick standard has no analog sticks, gyro, trackpads or back buttons.
@@ -177,6 +187,8 @@ Include the Pak version, the handheld model, the NextUI version, the host OS,
 the controller type, and what you expected versus what happened. A photo of
 the screen helps when the interface is wrong.
 
+### Recovery
+
 If Bluetooth stays stopped after a crash or a forced exit, reboot the handheld
 or run:
 
@@ -196,7 +208,8 @@ type again in the Pairing screen, and pair once more.
 
 ## Build from source
 
-Requires Rust and the `aarch64-unknown-linux-musl` target:
+Requires Rust and the `aarch64-unknown-linux-musl` target. The Pak Store
+archive check also needs `jq` and `unzip`:
 
 ```sh
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -204,7 +217,8 @@ rustup target add aarch64-unknown-linux-musl
 cargo fmt --all
 cargo test --workspace
 cargo build --release --target aarch64-unknown-linux-musl -p brick-controller
-VERSION=0.1.0 ./apps/brick-controller/deploy/package.sh
+VERSION=v1.0.0 ./apps/brick-controller/deploy/package.sh
+./scripts/check-pak.sh v1.0.0
 ```
 
 The binary is static; no Rust runtime is needed on the handheld.
@@ -212,9 +226,9 @@ The binary is static; no Rust runtime is needed on the handheld.
 ## Credits and license
 
 This project is based on **Padpod**, the TrimUI Brick Pro Bluetooth controller
-by its authors: <https://github.com/duyquang6/padpod>. Padpod is licensed under
-the GNU GPL v3 with additional terms. The license and credits travel with the
-pak (`LICENSE`, `ADDITIONAL-TERMS.md`, `CREDITS.md`, `OFL.txt`).
+by ligt and its contributors: <https://github.com/duyquang6/padpod>. Padpod is
+licensed under the GNU GPL v3 with additional terms. The license and credits
+travel with the pak (`LICENSE`, `ADDITIONAL-TERMS.md`, `CREDITS.md`, `OFL.txt`).
 
 This modified version is released under the same GPL-3.0 terms and additional
 terms as Padpod. It is not an official Padpod release.

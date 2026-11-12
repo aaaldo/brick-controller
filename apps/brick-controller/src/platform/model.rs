@@ -49,6 +49,16 @@ impl Model {
             .unwrap_or(Self::Unknown)
     }
 
+    /// Whether this build has a layout and hardware path for the model.
+    ///
+    /// The Smart Pro shares `tg5040` with the Brick but uses a 1280×720 panel;
+    /// until its layout exists, starting would draw a cropped 1024×768
+    /// interface and take Bluetooth away from NextUI for nothing. `Unknown`
+    /// stays allowed so a manual launch outside NextUI keeps the Brick path.
+    pub fn is_supported(self) -> bool {
+        !matches!(self, Self::SmartPro | Self::SmartProS)
+    }
+
     /// The motor voltage to use while this application owns the rumble path.
     ///
     /// The Brick Pro's driver can reach 3.3 V, but NextUI deliberately caps it
@@ -86,6 +96,15 @@ mod tests {
         assert_eq!(Model::parse("Trimui Brick"), Model::Brick);
         assert_eq!(Model::parse("Trimui Brick Pro"), Model::BrickPro);
         assert_eq!(Model::parse("Trimui Smart Pro S"), Model::SmartProS);
+    }
+
+    #[test]
+    fn the_smart_pro_is_refused_until_its_layout_exists() {
+        assert!(Model::Brick.is_supported());
+        assert!(Model::BrickPro.is_supported());
+        assert!(Model::Unknown.is_supported());
+        assert!(!Model::SmartPro.is_supported());
+        assert!(!Model::SmartProS.is_supported());
     }
 
     #[test]

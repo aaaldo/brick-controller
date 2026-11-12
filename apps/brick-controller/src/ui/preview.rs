@@ -111,6 +111,14 @@ fn preview_every_screen() {
             },
             preview_status(false),
         ),
+        (
+            "unsupported",
+            View::Unsupported {
+                title: tr(Lang::En, Key::UnsupportedDeviceTitle).into(),
+                message: tr(Lang::En, Key::UnsupportedDeviceMessage).into(),
+            },
+            preview_status(false),
+        ),
     ];
     for (name, view, status) in screens {
         let mut canvas = Canvas::in_memory(1024, 768);

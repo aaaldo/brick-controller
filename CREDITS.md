@@ -1,13 +1,19 @@
 # Credits
 
-Padpod stands on other people's work: device documentation, the Linux
+Brick Controller builds on other people's work: device documentation, the Linux
 drivers that record what these controllers say about themselves, and
 open-source tools. Thank you to everyone below.
 
+Brick Controller is a modified version of
+[Padpod](https://github.com/duyquang6/padpod), the TrimUI Brick Pro Bluetooth
+controller by ligt and its contributors. Padpod is licensed under the GNU GPL
+v3 with additional terms; those terms travel with this project.
+
 ## In this repository
 
-| Work | License | What Padpod uses | Where |
+| Work | License | What Brick Controller uses | Where |
 |---|---|---|---|
+| [Padpod](https://github.com/duyquang6/padpod), by ligt and its contributors | GPL-3.0 with additional terms | The original TrimUI Brick Pro Bluetooth controller this project is based on | `LICENSE`, `ADDITIONAL-TERMS.md` |
 | [Nunito](https://github.com/googlefonts/nunito), by The Nunito Project Authors | SIL Open Font License 1.1 | The interface font, subset | `crates/brick/assets/` (with `OFL.txt`) |
 | [Apostrophe](https://github.com/Helaas/Apostrophe), by Helaas | MIT | NextUI layout metrics and widget behaviour used as the design reference | `apps/brick-controller/src/ui.rs` |
 | [deck-as-controller](https://github.com/jmedina21/deck-as-controller), by jmedina21 | MIT | Switch Pro Controller protocol, descriptor and subcommand handling, ported to Rust | `apps/brick-controller/src/profiles/switch_pro.rs` |
@@ -57,9 +63,10 @@ SOFTWARE.
   control and interrupt channels.
 - The SPRUCE theme of spruceOS - the colours the interface uses.
 
-## Tools Padpod runs
+## Tools Brick Controller runs
 
-Not part of this repository; Padpod uses them as the handheld provides them.
+Not part of this repository; Brick Controller uses them as the handheld
+provides them.
 
 - [BlueZ](http://www.bluez.org/) - the Bluetooth stack, driven over D-Bus.
 - [spruceOS](https://github.com/spruceUI/spruceOS) - the handheld's firmware

@@ -18,8 +18,8 @@ body:
     id: pak_version
     attributes:
       label: Brick Controller version
-      description: The version shown in Pak Store, or the first line of the log.
-      placeholder: "0.1.0"
+      description: The version shown in Pak Store, or the `brick-controller ...` line in the log.
+      placeholder: "v1.0.0"
     validations:
       required: true
 
