@@ -27,8 +27,8 @@ pub const MARKER: &str = "/tmp/brick-controller-bluetoothd";
 
 /// The daemon cannot start because the adapter is absent.
 ///
-/// This is also the identifier the session matches to show the translated
-/// message; the user-facing English text lives in `i18n`.
+/// The session matches this sentinel to show the generic activation error;
+/// the user-facing English text lives in `i18n`.
 pub const BLUETOOTH_OFF: &str =
     "Bluetooth is off. Turn it on in NextUI settings and open Brick Controller again.";
 

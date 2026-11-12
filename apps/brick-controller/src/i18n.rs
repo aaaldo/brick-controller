@@ -63,7 +63,6 @@ keys! {
     ControllerLine,
     ReconnectingTo,
     WaitingForHost,
-    BluetoothUnavailable,
     DisconnectHold,
     ScreenOffHint,
     Confirm,
@@ -76,11 +75,8 @@ keys! {
     ForgetMessage,
     ConnectingTo,
     StartingBluetooth,
-    BluetoothOffTitle,
-    BluetoothOffMessage,
-    TurnBluetoothOn,
-    ReopenApp,
-    ClosingIn,
+    ErrorTitle,
+    BluetoothActivationError,
 }
 
 /// The string for `key` in `lang`.
@@ -125,7 +121,6 @@ fn english(key: Key) -> &'static str {
         Key::ControllerLine => "{type} controller",
         Key::ReconnectingTo => "Reconnecting to {host}…",
         Key::WaitingForHost => "Waiting for a host…",
-        Key::BluetoothUnavailable => "Bluetooth unavailable",
         Key::DisconnectHold => "Disconnect (Hold)",
         Key::ScreenOffHint => {
             "Screen will switch off after 10s. Press Menu+Start once to wake it up"
@@ -140,13 +135,10 @@ fn english(key: Key) -> &'static str {
         Key::ForgetMessage => "You will need to pair it again from the host.",
         Key::ConnectingTo => "Connecting to {name}",
         Key::StartingBluetooth => "Starting Bluetooth…",
-        Key::BluetoothOffTitle => "Bluetooth off",
-        Key::BluetoothOffMessage => {
-            "Bluetooth is off. Turn it on in NextUI settings and open Brick Controller again."
+        Key::ErrorTitle => "Error",
+        Key::BluetoothActivationError => {
+            "A problem occurred during Bluetooth activation. Please try again."
         }
-        Key::TurnBluetoothOn => "Open NextUI Settings and turn Bluetooth on.",
-        Key::ReopenApp => "Close Brick Controller and open it again.",
-        Key::ClosingIn => "Closing in {n} s.",
     }
 }
 
@@ -184,7 +176,6 @@ mod tests {
             (Key::ReconnectingTo, "{host}"),
             (Key::ForgetTitle, "{name}"),
             (Key::ConnectingTo, "{name}"),
-            (Key::ClosingIn, "{n}"),
         ];
         for (key, placeholder) in templates {
             let text = tr(Lang::En, key);
@@ -194,15 +185,5 @@ mod tests {
                 text.replace(placeholder, "value")
             );
         }
-    }
-
-    #[test]
-    fn the_bluetooth_off_message_matches_its_sentinel() {
-        // The session compares the daemon's error with this string to choose
-        // the translated message. Keep both in sync.
-        assert_eq!(
-            tr(Lang::En, Key::BluetoothOffMessage),
-            crate::bluetooth::bluez::BLUETOOTH_OFF
-        );
     }
 }

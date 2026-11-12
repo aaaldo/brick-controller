@@ -20,7 +20,7 @@ use crate::bluetooth::{
     sdp, Address,
 };
 use crate::hid;
-use crate::i18n::{fill, tr, Key, Lang};
+use crate::i18n::{tr, Key, Lang};
 use crate::input::{Button, PadState};
 use crate::platform::input_trimui::Pad;
 use crate::platform::{display, rumble, StatusInfo};
@@ -1034,17 +1034,17 @@ fn fail(
     lang: Lang,
 ) -> Result<SessionOutcome, String> {
     eprintln!("brick-controller: {error}");
-    let deadline = Instant::now() + Duration::from_secs(60);
     let mut previous = pad.mapper.state;
-    let mut shown = 60u64;
     screen.show(Frame {
         lang,
-        view: error_view(lang, &error, fill(tr(lang, Key::ClosingIn), &[("n", "60")])),
+        view: error_view(lang, &error),
         status: StatusInfo::read(false),
         modal: None,
         hold: None,
     });
-    while Instant::now() < deadline {
+    // No timeout: the screen stays up until the user retries or quits. A
+    // silent auto-close would hide the reason Bluetooth failed.
+    loop {
         let mut fd = libc::pollfd {
             fd: pad.as_raw_fd(),
             events: libc::POLLIN,
@@ -1063,44 +1063,23 @@ fn fail(
                 return Ok(SessionOutcome::Quit);
             }
         }
-        let left = deadline.saturating_duration_since(Instant::now()).as_secs();
-        if left != shown {
-            shown = left;
-            let countdown = left.to_string();
-            screen.show(Frame {
-                lang,
-                view: error_view(
-                    lang,
-                    &error,
-                    fill(tr(lang, Key::ClosingIn), &[("n", &countdown)]),
-                ),
-                status: StatusInfo::read(false),
-                modal: None,
-                hold: None,
-            });
-        }
     }
-    Ok(SessionOutcome::Quit)
 }
 
 /// The error screen for a failed Bluetooth takeover.
 ///
 /// The daemon's own message is shown only for the known Bluetooth-off case;
 /// anything else is a technical detail kept verbatim so a bug report can be
-/// matched to the log.
-fn error_view(lang: Lang, error: &str, countdown: String) -> View {
+/// matched to the log. The UI adds no steps: the hint label says what to do,
+/// and the footer offers Retry and Quit.
+fn error_view(lang: Lang, error: &str) -> View {
     let message = if error == bluez::BLUETOOTH_OFF {
-        tr(lang, Key::BluetoothOffMessage).into()
+        tr(lang, Key::BluetoothActivationError).into()
     } else {
         error.to_string()
     };
     View::Error {
-        title: tr(lang, Key::BluetoothOffTitle).into(),
+        title: tr(lang, Key::ErrorTitle).into(),
         message,
-        steps: vec![
-            tr(lang, Key::TurnBluetoothOn).into(),
-            tr(lang, Key::ReopenApp).into(),
-        ],
-        countdown: Some(countdown),
     }
 }
