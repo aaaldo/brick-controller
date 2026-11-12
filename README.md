@@ -1,177 +1,141 @@
 # Brick Controller
 
-Turn a **TrimUI Brick or Brick Pro running NextUI** into a Bluetooth gamepad
-for a PC, Mac, Linux/SteamOS machine, Android device or iPad.
+**Turn a TrimUI Brick or Brick Pro into a Bluetooth gamepad. No driver on the
+host.**
 
-The handheld shows up as a standard Bluetooth HID controller. Nothing has to be
-installed on the host.
+<p align="center">
+  <img src="brick-ui-mockups/actual/menu.png" alt="Brick Controller Devices screen" width="820">
+</p>
 
-> **Status: Phase 1.** Bluetooth only, PC, Xbox, PlayStation and Switch
-> identities on the Brick and Brick Pro (`tg5040`). Smart Pro and `tg5050` are
-> planned next. USB HID is not part of the current release.
+Brick Controller is a NextUI Pak. It makes the handheld appear as a standard
+Bluetooth HID controller to a PC, Mac, Linux/SteamOS machine, Android device or
+iPad. Pair it the way you would pair any other gamepad, then play.
 
-## Features
+> **Status.** The Brick is supported. The Brick Pro uses the same `tg5040`
+> package and code path, but has not yet been validated on Brick Pro hardware.
+> Smart Pro and `tg5050` are planned. Bluetooth only; USB HID is not available
+> yet.
 
-- Standard Bluetooth HID gamepad: no host driver.
-- D-pad, A/B/X/Y, L1/L2/R1/R2, Start, Select, Menu, and L3/R3. On the Brick
-  standard, the front F1/F2 keys act as L3/R3. On the Brick Pro, L3/R3 are the
-  real stick clicks and the two Fn keys are not mapped.
-- The Brick Pro's two Hall-effect sticks are reported as normal analog axes.
-- Start and Select are passed to the host as normal gamepad buttons.
-- The **Devices** screen is the app's home and is shown at launch. It always
-  lists the paired hosts, even while one is connected, followed by **Pair a new
-  device**. **B** quits the app from the Devices screen.
-- Holding **Menu+Start** for 1 s disconnects and opens the Devices screen;
-  gamepad input is neutralised while the chord is held. F1 and F2 are not used
-  for navigation: on the Brick standard they reach the host as **L3** and
-  **R3**.
-- Opening Devices stops the active link or pairing attempt. Nothing connects
-  automatically at launch or after returning to Devices: choose a host and
-  press **Connect**, or open **Pair a new device**.
-- Pressing **Connect** shows a blocking **Connecting to <device>** popup with an
-  animated loading bar until the host answers. The popup closes after 15
-  seconds if the host does not respond.
-- Inside the Devices screen, D-pad moves, **A** connects the selected host (or
-  opens **Pair a new device**) and **X** forgets it. In a sub-screen, B goes
-  back, A selects; on the Devices screen, B quits.
-- Forgetting a host asks for confirmation. The controller type is chosen only
-  while pairing a new host, not for an already paired one.
-- The controller view is titled **Connected** and shows the host and the
-  connection profile.
-- The status bar shows the time, Bluetooth, Wi-Fi and battery state, using the
-  nextval colours and the NextUI font when they are available.
-- After a host connects, the panel switches off after 10 seconds while the
-  gamepad keeps working. Press **Menu+Start** once to wake it; each wake starts
-  a new 10-second cycle. The chord is not sent to the host.
-- **MENU** tap sends Home/Guide while the controller view is active.
-- Rumble in Xbox, PlayStation and Switch modes when the host sends output
-  reports; the PC profile has no rumble output report.
-- Quit is immediate from the Devices screen with **B**. There is no quit row, no
-  confirmation dialog and no destructive quit chord.
-- Connections are manual: the app never pages a saved host at launch, and the
-  last host's identity is only used when it is explicitly connected.
-- Runs the CPU governor in `powersave` and draws no frames while the panel is
-  off, to keep battery use low.
-- Clean restore of NextUI's Bluetooth stack, panel brightness and mixer
-  settings when the app exits.
-- Only one instance runs at a time: launching the Pak again stops the previous
-  session and starts a fresh one.
+## What you get
 
-## Requirements
+- A real Bluetooth gamepad: D-pad, A/B/X/Y, L1/L2/R1/R2, Start, Select and
+  Menu. On the Brick standard, F1/F2 work as L3/R3. On the Brick Pro, the two
+  Hall-effect sticks and the real L3/R3 clicks follow the same input path; its
+  Fn keys are not mapped.
+- Four controller identities to choose from when pairing: PC, Xbox,
+  PlayStation and Switch.
+- A **Devices** home screen that lists your paired hosts. Nothing connects
+  until you choose it.
+- A screen that gets out of the way: the panel turns off after 10 seconds while
+  the gamepad keeps working. Tap **Menu+Start** once to wake it.
+- A status bar with the time, Bluetooth, Wi-Fi and battery state.
+- Rumble in Xbox, PlayStation and Switch modes.
+- A clean exit: NextUI gets its Bluetooth, brightness and volume settings back.
 
-- TrimUI Brick or Brick Pro with NextUI (`tg5040`).
-- Bluetooth enabled in NextUI before launching the app.
-- A data-capable USB-C cable only if you want to use ADB/SSH for development;
-  normal use is wireless.
+## Screens
 
-## Install
+| Devices | Pairing | Connected |
+| --- | --- | --- |
+| <img src="brick-ui-mockups/actual/menu.png" alt="Devices screen" width="260"> | <img src="brick-ui-mockups/actual/pairing.png" alt="Pairing screen" width="260"> | <img src="brick-ui-mockups/actual/controller.png" alt="Connected screen" width="260"> |
+| Your paired hosts and **Pair a new device**. | The name, controller type and a waiting indicator. | The host, the active profile and the sleep hint. |
 
-1. Build or download `Brick Controller.pak`.
-2. Copy the `Brick Controller.pak` folder to:
+| Controller type | Forget a host | Changing type |
+| --- | --- | --- |
+| <img src="brick-ui-mockups/actual/profile.png" alt="Controller type screen" width="260"> | <img src="brick-ui-mockups/actual/confirm.png" alt="Forget confirmation" width="260"> | <img src="brick-ui-mockups/actual/changing-type.png" alt="Changing controller type popup" width="260"> |
+| Pick the identity for the next pairing. | Forgetting always asks for confirmation. | The Bluetooth session restarts with the new identity. |
+
+## Getting started
+
+### What you need
+
+- A TrimUI Brick or Brick Pro running NextUI (`tg5040`).
+- Bluetooth enabled in NextUI.
+- The `Brick Controller.pak` folder.
+
+A USB-C cable is only needed for development over ADB or SSH. Normal use is
+wireless.
+
+### Install
+
+1. Copy `Brick Controller.pak` to:
 
    ```text
    /mnt/SDCARD/Tools/tg5040/
    ```
 
-3. Eject the SD card safely and put it back in the handheld.
-4. Open **Tools → Brick Controller**.
+2. Put the SD card back in the handheld.
+3. Open **Tools → Brick Controller**.
 
-The Brick Pro runs the `tg5040` NextUI platform, so it uses the same
-`Tools/tg5040/` folder and the same package as the Brick standard. Its sticks
-and L3/R3 follow the same input path; hardware validation on a Brick Pro is
-still pending, so the Brick standard remains the reference device.
+The Brick Pro uses the same `tg5040` folder and the same package as the Brick
+standard.
 
-For development, ADB can push the pak directly:
-
-```sh
-VERSION=0.1.0 ./apps/brick-controller/deploy/deploy.sh
-```
-
-Use the **bottom USB-C port** for ADB. The top port is a USB host port.
-
-## Use
+### Pair your first host
 
 1. Turn Bluetooth on in NextUI.
-2. Open **Brick Controller** from Tools. The **Devices** screen is the home
-   screen and does not connect to a host on its own.
-3. To pair a new host, select **Pair a new device**, press **X** to choose the
-   controller type, then open Bluetooth settings on the host and pair with the
-   name shown on the handheld: `Brick Controller (PC)`,
-   `Brick Controller (Xbox)`, `Brick Controller (PS4)` or
-   `Brick Controller (Switch)`.
-4. To use an already paired host, select it and press **Connect**. A blocking
-   **Connecting to <device>** popup is shown while the link is established.
-   After that, the controller view shows the host and the profile. The panel
-   switches off after 10 seconds; press **Menu+Start** once to light it again.
-5. Hold **Menu+Start** for 1 s to disconnect and open the Devices screen; the
-   current link or pairing attempt is stopped. Press **A** to connect the
-   selected host or **X** to forget it after confirming. Press **B** in the
-   Devices screen to quit.
-6. Tap **MENU** on the controller view to send Home/Guide.
+2. Open **Brick Controller → Pair a new device**.
+3. Press **X** to choose the controller type.
+4. On the host, open its Bluetooth settings and pair with the name shown on the
+   handheld:
+   - `Brick Controller (PC)`
+   - `Brick Controller (Xbox)`
+   - `Brick Controller (PS4)`
+   - `Brick Controller (Switch)`
+5. The **Pairing** screen completes when the host connects.
 
-Start is used with Menu for the disconnect and wake chord; otherwise Start and
-Select reach the host as normal gamepad buttons. While the Devices screen or a
-sub-screen is open, gamepad input is kept away from the host.
+The type is chosen for the next pairing. An already paired host keeps the
+identity it first saw; to change it, forget the host on both sides and pair
+again.
+
+## Everyday use
+
+- **Devices** is the home screen. It does not connect to a host on its own.
+- **A** connects the selected host or opens **Pair a new device**.
+- **X** forgets the selected host after confirmation.
+- **B** quits the app from the Devices screen.
+- Hold **Menu+Start** for 1 second to disconnect and return to Devices.
+- Tap **Menu** on the controller view to send Home/Guide.
+- After 10 seconds, the panel turns off. Tap **Menu+Start** once to wake it;
+  this does not send the chord to the host.
+
+Start and Select reach the host as normal gamepad buttons. While an interface
+screen is open, gamepad input is kept away from the host.
 
 ## Controller types
 
-The identity is chosen when pairing a new host:
+Choose the type that matches the host drivers. The host sees the Bluetooth
+name, not the internal profile name.
 
-- **PC** is a generic HID gamepad. It works with Windows, Linux/SteamOS,
-  Android, and with Mac/iPad apps that read HID directly (Steam, for example).
-  macOS's GameController framework only exposes known controller families, so
-  a generic pad does not appear in System Settings > Game Controllers and
-  GameController-based games ignore it. Use the Xbox, PlayStation or Switch
-  profile on Apple hosts.
-- **Xbox** advertises the handheld as an Xbox Wireless Controller
-  (`045E:02FD`, Bluetooth name `Brick Controller (Xbox)`), for XInput on
-  Windows and native Xbox support on macOS, iPadOS and Android. It reads the
-  host's rumble output report.
-- **PlayStation** presents a DualShock 4 (`054C:09CC`, Bluetooth name
-  `Brick Controller (PS4)`). Hosts that support the DualShock 4 recognise it
-  natively, including Windows, macOS, Linux, Android and iPadOS. It reads
-  rumble from the host.
-- **Switch** presents a Switch Pro Controller (`057E:2009`, Bluetooth name
-  `Brick Controller (Switch)`). The SDP Device ID advertises that USB identity,
-  so macOS, iPadOS and Windows bind their native Pro Controller driver. It
-  implements the Switch handshake and the 0x30/0x21 reports. It reads rumble
-  from the host.
+| Type | Bluetooth name | Best for |
+| --- | --- | --- |
+| **PC** | `Brick Controller (PC)` | Windows, Linux/SteamOS, Android, and Mac/iPad apps that read HID directly (Steam, for example) |
+| **Xbox** | `Brick Controller (Xbox)` | XInput on Windows; native Xbox support on macOS, iPadOS and Android |
+| **PlayStation** | `Brick Controller (PS4)` | Hosts with DualShock 4 support: Windows, macOS, Linux, Android and iPadOS |
+| **Switch** | `Brick Controller (Switch)` | Native Pro Controller support on macOS, iPadOS and Windows |
 
-Open **Pair a new device**, press **X** to choose the controller type, then pair
-from the host. Choosing another type restarts the Bluetooth session with the
-new identity and returns to the **Pairing** screen, ready for the host to pair.
-A blocking **Changing controller type** popup with a loading bar covers the
-restart.
-Each host keeps the identity it first paired with, and the handheld uses it again
-when that host is connected.
+On Apple hosts, use **Xbox**, **PlayStation** or **Switch**. macOS does not
+expose a generic HID gamepad to its GameController framework, so the PC profile
+does not appear in System Settings or in games built on that framework.
 
-The controller type of an already paired host is not editable from Devices. To
-change it, forget the host on both sides, choose the other type in the pairing
-screen and pair again.
+## Good to know
 
-## Limitations
-
-- **Bluetooth only**. USB HID is not available.
-- Rumble is available in Xbox, PlayStation and Switch modes. The PC profile's
-  descriptor has no output report, so PC hosts do not vibrate the handheld.
-- The PlayStation profile uses the DualShock 4 identity. It does not present a
-  DualSense, and does not emulate the lightbar, touchpad, adaptive triggers or
-  motion sensors.
-- The Switch profile does not send IMU, NFC or IR data, and its single motor
-  receives the strongest rumble band rather than HD rumble. Compatibility with
-  the Nintendo Switch console itself is not claimed; the profile targets the
-  hosts listed above.
+- **Bluetooth only.** USB HID is not part of this release.
+- Rumble works in Xbox, PlayStation and Switch modes. The PC profile has no
+  output report, so PC hosts do not vibrate the handheld.
 - The Brick standard has no analog sticks, gyro, trackpads or back buttons.
-  Sticks are reported centred for host compatibility. The Brick Pro has two
-  Hall-effect sticks and real L3/R3 clicks; its Fn keys are left unmapped.
+  Sticks are reported centred for host compatibility. The Brick Pro adds two
+  Hall-effect sticks and real L3/R3 clicks, with its Fn keys left unmapped.
 - Bluetooth audio and the controller cannot share the radio cleanly. `bluealsa`
   is stopped while the controller runs and restored on exit.
-- Wi-Fi and Bluetooth share one antenna on the Brick and Brick Pro; expect
+- Wi-Fi and Bluetooth share one antenna on the Brick and Brick Pro. Expect
   reduced Wi-Fi throughput during a session.
-- Windows compatibility is less tested than macOS, across all profiles.
-- A host remembers the controller identity it first paired. Switching between
-  controller types therefore requires removing the old pairing on that host
-  and pairing again.
+- Windows has been tested less than macOS, across all profiles.
+- The PlayStation profile presents a DualShock 4. It does not emulate a
+  DualSense, its lightbar, touchpad, adaptive triggers or motion sensors.
+- The Switch profile does not send IMU, NFC or IR data, and its single motor
+  receives the strongest rumble band rather than HD rumble. It targets the
+  hosts above, not the Nintendo Switch console itself.
+- A host remembers the controller identity it first paired. To switch types,
+  forget the old pairing on the host and pair again.
 
 ## Troubleshooting
 
@@ -181,24 +145,24 @@ Logs are written to:
 /mnt/SDCARD/.userdata/tg5040/logs/BrickController.txt
 ```
 
-If Bluetooth remains stopped after a crash or a forced exit, reboot the
-handheld or run:
+If Bluetooth stays stopped after a crash or a forced exit, reboot the handheld
+or run:
 
 ```sh
 /mnt/SDCARD/.system/tg5040/etc/bluetooth/bt_init.sh start
 ```
 
-If the panel remains dark after a crash or a forced exit, press
-**Menu+Start** once to wake it. `launch.sh` also restores the saved brightness and runs
-`syncsettings.elf` on exit; running
+If the panel stays dark, press **Menu+Start** once to wake it. To restore
+NextUI's own brightness and volume settings, run:
 
 ```sh
 /mnt/SDCARD/.system/tg5040/bin/syncsettings.elf
 ```
 
-restores NextUI's own brightness and volume settings.
+If pairing fails, remove the old pairing on both sides, choose the controller
+type again in the Pairing screen, and pair once more.
 
-## Build
+## Build from source
 
 Requires Rust and the `aarch64-unknown-linux-musl` target:
 

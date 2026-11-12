@@ -39,13 +39,19 @@ fn preview_menu_rows(linked: bool) -> Vec<Row> {
 
 /// `BRICK_CONTROLLER_PREVIEW=dir cargo test preview` writes every screen
 /// as a PNG, so the layout can be checked without the device.
+///
+/// `BRICK_CONTROLLER_PREVIEW_THEME` optionally points to a `nextval.elf`
+/// JSON captured from the device; without it the fallback palette is used.
 #[test]
 fn preview_every_screen() {
     let Ok(dir) = std::env::var("BRICK_CONTROLLER_PREVIEW") else {
         return;
     };
     let _ = fs::create_dir_all(&dir);
-    let theme = Theme::fallback();
+    let theme = std::env::var_os("BRICK_CONTROLLER_PREVIEW_THEME")
+        .and_then(|path| fs::read_to_string(path).ok())
+        .map(|json| Theme::from_json(&json))
+        .unwrap_or_else(Theme::fallback);
     let mut fonts = Fonts::load(&[]);
     let screens: Vec<(&str, View, StatusInfo)> = vec![
         (
