@@ -87,7 +87,8 @@ type again in Pairing, and pair once more.
 
 Reporting a problem
 -------------------
-Open an issue on the project repository and attach
+Brick Controller is a community Pak; NextUI maintainers do not provide support
+for it. Open an issue on the project repository and attach
 /mnt/SDCARD/.userdata/tg5040/logs/BrickController.txt. The previous run is
 kept as BrickController.txt.1 when the log rotates. Remove or mask the
 Bluetooth names and addresses of your hosts if you do not want them public.

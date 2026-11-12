@@ -16,9 +16,10 @@ iPad. Pair it the way you would pair any other gamepad, then play.
 > Smart Pro and `tg5050` are not supported yet: the app refuses to start on
 > them. Bluetooth only; USB HID is not available yet.
 
-> **Found a problem?** Open a bug report from the repository's **Issues** tab
-> and attach the log. [Troubleshooting](#troubleshooting) explains where to
-> find it.
+> **Found a problem?** Brick Controller is a community Pak; NextUI maintainers
+> do not provide support for it. Open a bug report from the repository's
+> **Issues** tab and attach the log. [Troubleshooting](#troubleshooting)
+> explains where to find it.
 
 ## What you get
 
