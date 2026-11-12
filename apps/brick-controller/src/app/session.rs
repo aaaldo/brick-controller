@@ -240,6 +240,10 @@ pub(crate) fn session(
     screen: &Renderer,
     pad: &mut Pad,
 ) -> Result<SessionOutcome, String> {
+    // The profile is not part of the Bluetooth events below; record it at the
+    // start so a bug report shows which identity was active even when the
+    // session never reaches a host.
+    eprintln!("session: profile={} start={start:?}", profile.key());
     let lang = Lang::En;
     if start == StartScreen::Splash {
         screen.show(Frame {

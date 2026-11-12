@@ -46,6 +46,15 @@ elif [ -n "$OLD_APP" ]; then
 fi
 echo "$$" >"$PIDFILE"
 
+# A bug report needs the firmware and model behind the log, and one previous
+# run is enough context. Rotate after the previous wrapper has finished so the
+# new run starts with its own header.
+if [ -f "$LOG" ] && [ "$(wc -c <"$LOG" | tr -d ' ')" -gt 262144 ]; then
+    mv -f "$LOG" "$LOG.1"
+fi
+NEXTUI_VERSION=$(head -n 1 "${SDCARD_PATH:-/mnt/SDCARD}/.system/version.txt" 2>/dev/null | tr -d '\r')
+echo "launch: $(date '+%Y-%m-%d %H:%M:%S') platform=${PLATFORM:-unknown} device=${DEVICE:-unknown} nextui=${NEXTUI_VERSION:-unknown}" >>"$LOG"
+
 # FAT refuses to replace a running executable. deploy.sh leaves the new build
 # beside the old one; promote it now that nothing is running.
 if [ -x "$DIR/brick-controller.next" ]; then

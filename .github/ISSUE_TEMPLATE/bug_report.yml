@@ -1,0 +1,156 @@
+name: Bug report
+description: Report a problem with Brick Controller
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a problem.
+
+        Update to the latest release and check the Troubleshooting section of
+        the README first. The log is at
+        `/mnt/SDCARD/.userdata/tg5040/logs/BrickController.txt`; attach it
+        below. It records the Bluetooth names and addresses of the hosts you
+        paired, so mask anything you do not want to share.
+
+  - type: input
+    id: pak_version
+    attributes:
+      label: Brick Controller version
+      description: The version shown in Pak Store, or the first line of the log.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: device
+    attributes:
+      label: Handheld
+      description: The model running Brick Controller.
+      options:
+        - TrimUI Brick
+        - TrimUI Brick Pro
+        - TrimUI Smart Pro
+        - TrimUI Smart Pro S
+        - Other / unknown
+    validations:
+      required: true
+
+  - type: input
+    id: nextui_version
+    attributes:
+      label: NextUI version
+      description: Shown in NextUI, or the first line of /mnt/SDCARD/.system/version.txt.
+      placeholder: "NextUI-20261013-0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: host
+    attributes:
+      label: Host
+      description: The device the controller was paired with.
+      options:
+        - macOS
+        - Windows
+        - Linux / SteamOS
+        - Android
+        - iPadOS
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: host_version
+    attributes:
+      label: Host version
+      description: For example macOS 15.1, Windows 11 24H2, Ubuntu 24.04, Android 15 or iPadOS 18.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: profile
+    attributes:
+      label: Controller type
+      description: The type selected for this host.
+      options:
+        - PC
+        - Xbox
+        - PlayStation (DualShock 4)
+        - Switch Pro
+        - Not paired yet
+    validations:
+      required: true
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: When it happens
+      options:
+        - Launching the Pak
+        - Pairing
+        - Connecting or reconnecting
+        - While connected (buttons, sticks, rumble)
+        - Disconnecting or quitting
+        - After a crash / Bluetooth left off
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The shortest sequence that shows the problem.
+      placeholder: |
+        1. Open Brick Controller.
+        2. Select ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What happened instead. Include what the screen shows, whether a reboot changes it, and whether another host or profile works.
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: Drag /mnt/SDCARD/.userdata/tg5040/logs/BrickController.txt into this field, paste the last 100 lines, or explain why you cannot retrieve it.
+      placeholder: |
+        Attach BrickController.txt, or paste the last 100 lines here.
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Photos of the screen, other tests, or details that may help.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I am running the latest Brick Controller release.
+          required: true
+        - label: I checked the Troubleshooting section of the README.
+          required: true
+        - label: I removed or masked any personal information I do not want to share.
+          required: true
