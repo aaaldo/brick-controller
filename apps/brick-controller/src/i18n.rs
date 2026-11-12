@@ -133,13 +133,13 @@ fn english(key: Key) -> &'static str {
         Key::ControllerLine => "{type} controller",
         Key::ReconnectingTo => "Reconnecting to {host}…",
         Key::WaitingForHost => "Waiting for a host…",
-        Key::DisconnectHold => "Disconnect (Hold)",
+        Key::DisconnectHold => "Screen On / Disconnect (Hold)",
         Key::ScreenOffHint => {
-            "Screen will switch off after 10s. Press Menu+Start once to wake it up"
+            "Screen will switch off after 10s"
         }
         Key::Confirm => "Confirm",
-        Key::HoldTitle => "Keep holding to disconnect…",
-        Key::HoldMessage => "Input is paused while Menu and Start are held.",
+        Key::HoldTitle => "Hold to disconnect",
+        Key::HoldMessage => "Release Menu + Start to cancel",
         Key::Offline => "Offline",
         Key::PairNew => "Pair a new device",
         Key::Settings => "Settings",

@@ -572,7 +572,8 @@ Règles :
   (1 s), mode indéterminé animé pour le splash et la connexion.
 - Menu+Start maintenu 1 s déconnecte et ouvre Devices depuis la vue Connected :
   aucun rapport HID n'est envoyé pendant le maintien. Un overlay
-  « Keep holding to disconnect… » montre la progression. Sur Brick standard,
+  « Hold to disconnect » avec « Release Menu + Start to cancel » montre la
+  progression. Sur Brick standard,
   F1/F2 ne sortent pas de cette vue et restent des boutons L3/R3 pour l'hôte.
   Sur Brick Pro, les clics de sticks sont L3/R3 et les Fn ne sont pas mappées.
 - Dans l'écran Devices, la navigation est celle de NextUI : D-pad, **A** pour
@@ -658,7 +659,8 @@ reconstruire avant le test.
 - Brick standard : F1/F2 sans navigation, envoyées à l'hôte comme L3/R3 ;
 - Brick Pro : sticks gauche/droit, clics L3/R3, Fn 59/60 sans effet ;
 - Brick Pro : rumble plafonné à 2,5 V, puis 3,3 V restaurés à la sortie ;
-- maintien Menu+Start : overlay « Keep holding to disconnect… », HID neutralisé ;
+- maintien Menu+Start : overlay « Hold to disconnect » /
+  « Release Menu + Start to cancel », HID neutralisé ;
 - appui simple Menu+Start sur écran éteint : réveil sans envoi à l'hôte ;
 - navigation Devices/sous-écrans avec D-pad/A/B ;
 - ligne Settings sous Pair a new device, ouverture par A, retour par B avec le
