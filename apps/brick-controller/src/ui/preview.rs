@@ -34,6 +34,7 @@ fn preview_menu_rows(linked: bool) -> Vec<Row> {
         Row::new("iPhone", format!("Xbox · {offline}"), false),
     ];
     rows.push(Row::new(tr(Lang::En, Key::PairNew), "PC", false));
+    rows.push(Row::new(tr(Lang::En, Key::Settings), "", false));
     rows
 }
 
@@ -52,7 +53,10 @@ fn preview_every_screen() {
         .and_then(|path| fs::read_to_string(path).ok())
         .map(|json| Theme::from_json(&json))
         .unwrap_or_else(Theme::fallback);
-    let mut fonts = Fonts::load(&[]);
+    // Use the same font search as the app so the previews match the handheld:
+    // point SYSTEM_PATH at a captured `.system` tree, or the embedded fallback
+    // is used.
+    let mut fonts = Fonts::load(&super::font_paths());
     let screens: Vec<(&str, View, StatusInfo)> = vec![
         (
             "splash",
@@ -80,6 +84,20 @@ fn preview_every_screen() {
             "menu-idle",
             View::Menu {
                 rows: preview_menu_rows(false),
+            },
+            preview_status(true),
+        ),
+        (
+            "settings",
+            View::Settings {
+                rows: vec![
+                    Row::new(tr(Lang::En, Key::DpadMode), tr(Lang::En, Key::Dpad), true),
+                    Row::new(
+                        tr(Lang::En, Key::RumbleStrength),
+                        tr(Lang::En, Key::RumbleStrong),
+                        false,
+                    ),
+                ],
             },
             preview_status(true),
         ),

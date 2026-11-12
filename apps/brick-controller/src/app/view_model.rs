@@ -8,9 +8,10 @@
 //! labels and rows, and resolves modal titles once.
 
 use super::session::Link;
-use super::settings::Settings;
+use super::settings::{RumbleStrength, Settings};
 use crate::bluetooth::Address;
 use crate::i18n::{fill, tr, Key, Lang};
+use crate::input::DpadMode;
 use crate::profiles::Profile;
 use crate::ui::{Modal, Row, View};
 
@@ -19,6 +20,18 @@ use crate::ui::{Modal, Row, View};
 pub enum MenuRow {
     Host(usize),
     Pair,
+    Settings,
+}
+
+/// One focusable line on the Settings screen, in display order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingRow {
+    Dpad,
+    Rumble,
+}
+
+impl SettingRow {
+    pub const ALL: [Self; 2] = [Self::Dpad, Self::Rumble];
 }
 
 /// The screen currently displayed above the Bluetooth session.
@@ -30,6 +43,7 @@ pub enum MenuRow {
 pub enum Screen {
     Controller,
     Menu { cursor: usize },
+    Settings { cursor: usize },
     Profile { choice: Profile },
     Pairing { back: bool },
 }
@@ -136,9 +150,31 @@ pub fn view_for(
                         settings.pairing.label(),
                         index == cursor,
                     ),
+                    MenuRow::Settings => Row::new(tr(lang, Key::Settings), "", index == cursor),
                 })
                 .collect();
             View::Menu { rows }
+        }
+        Screen::Settings { cursor } => {
+            let cursor = (*cursor).min(SettingRow::ALL.len() - 1);
+            let rows = SettingRow::ALL
+                .iter()
+                .enumerate()
+                .map(|(index, row)| {
+                    let (label, value) = match row {
+                        SettingRow::Dpad => (
+                            tr(lang, Key::DpadMode),
+                            dpad_label(lang, settings.preferences.dpad),
+                        ),
+                        SettingRow::Rumble => (
+                            tr(lang, Key::RumbleStrength),
+                            rumble_label(lang, settings.preferences.rumble),
+                        ),
+                    };
+                    Row::new(label, value, index == cursor)
+                })
+                .collect();
+            View::Settings { rows }
         }
         Screen::Profile { choice } => {
             let rows = Profile::ALL
@@ -153,6 +189,30 @@ pub fn view_for(
             reconnecting: target.map(|addr| addr.to_string()),
         },
     }
+}
+
+/// The user-facing value of the D-pad setting.
+fn dpad_label(lang: Lang, mode: DpadMode) -> &'static str {
+    tr(
+        lang,
+        match mode {
+            DpadMode::Dpad => Key::Dpad,
+            DpadMode::LeftStick => Key::LeftStick,
+        },
+    )
+}
+
+/// The user-facing value of the rumble setting.
+fn rumble_label(lang: Lang, strength: RumbleStrength) -> &'static str {
+    tr(
+        lang,
+        match strength {
+            RumbleStrength::Off => Key::RumbleOff,
+            RumbleStrength::Low => Key::RumbleLow,
+            RumbleStrength::Mid => Key::RumbleMid,
+            RumbleStrength::Strong => Key::RumbleStrong,
+        },
+    )
 }
 
 /// The blocking popup shown while the session restarts with another identity.

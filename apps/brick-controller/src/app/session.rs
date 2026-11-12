@@ -8,10 +8,12 @@
 //! the L2CAP channels and the panel, but delegates report layout to
 //! `profiles` and view construction to `app::view_model`.
 
-use super::settings::{remember_profile, save_host, save_mode, save_profiles, Settings};
+use super::settings::{
+    remember_profile, save_host, save_mode, save_profiles, RumbleStrength, Settings,
+};
 use super::view_model::{
     changing_type_modal, modal_view, move_cursor, nav_dir, view_for, Dir, MenuRow, ModalState,
-    Screen,
+    Screen, SettingRow,
 };
 use super::StartScreen;
 use crate::bluetooth::{
@@ -158,11 +160,12 @@ fn drive_rumble(
     controller: &mut Controller,
     link: &LinkContext,
     motor: Option<&rumble::Rumble>,
+    strength: RumbleStrength,
     report: &[u8],
 ) -> bool {
     let output = controller.output(report, link);
     if let (Some(level), Some(motor)) = (output.rumble, motor) {
-        motor.set(level);
+        motor.set(strength.scaled(level));
     }
     output.disconnect
 }
@@ -367,7 +370,7 @@ pub(crate) fn session(
         }
 
         let control_state = if matches!(state, Screen::Controller) && modal.is_none() {
-            pad.mapper.state
+            pad.mapper.state.with_dpad_mode(settings.preferences.dpad)
         } else {
             PadState::default()
         };
@@ -529,7 +532,13 @@ pub(crate) fn session(
                     // needs to know which profile is active.
                     Ok(Some(message)) => {
                         if let Some(report) = hid::set_report_output(&message) {
-                            if drive_rumble(&mut controller, &link_ctx, motor.as_ref(), report) {
+                            if drive_rumble(
+                                &mut controller,
+                                &link_ctx,
+                                motor.as_ref(),
+                                settings.preferences.rumble,
+                                report,
+                            ) {
                                 lost = true;
                             }
                         }
@@ -556,7 +565,13 @@ pub(crate) fn session(
                 match l.interrupt.recv() {
                     Ok(Some(message)) => {
                         if let Some(report) = hid::data_output(&message) {
-                            if drive_rumble(&mut controller, &link_ctx, motor.as_ref(), report) {
+                            if drive_rumble(
+                                &mut controller,
+                                &link_ctx,
+                                motor.as_ref(),
+                                settings.preferences.rumble,
+                                report,
+                            ) {
                                 lost = true;
                             }
                         }
@@ -801,9 +816,42 @@ pub(crate) fn session(
                                             }
                                         }
                                         MenuRow::Pair => state = Screen::Pairing { back: true },
+                                        MenuRow::Settings => {
+                                            state = Screen::Settings { cursor: 0 };
+                                        }
                                     }
                                     drawn = None;
                                 }
+                            }
+                        }
+                        Screen::Settings { cursor } => {
+                            let cursor = cursor.min(SettingRow::ALL.len() - 1);
+                            if let Some(dir) = direction {
+                                match dir {
+                                    Dir::Up | Dir::Down => {
+                                        let delta = if dir == Dir::Up { -1 } else { 1 };
+                                        state = Screen::Settings {
+                                            cursor: move_cursor(
+                                                cursor,
+                                                SettingRow::ALL.len(),
+                                                delta,
+                                            ),
+                                        };
+                                        drawn = None;
+                                    }
+                                    Dir::Left | Dir::Right => {
+                                        let step = if dir == Dir::Right { 1 } else { -1 };
+                                        settings.preferences.cycle(SettingRow::ALL[cursor], step);
+                                        settings.preferences.save();
+                                        drawn = None;
+                                    }
+                                }
+                            }
+                            if back {
+                                state = Screen::Menu {
+                                    cursor: settings.rows().len().saturating_sub(1),
+                                };
+                                drawn = None;
                             }
                         }
                         Screen::Profile { choice } => {
@@ -925,7 +973,7 @@ pub(crate) fn session(
         let report_state = if ui_active || combo_seen || resume_after_release {
             PadState::default()
         } else {
-            now
+            now.with_dpad_mode(settings.preferences.dpad)
         };
 
         if let Some(l) = &link {
