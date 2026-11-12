@@ -24,7 +24,8 @@ Périmètre actuel :
   l'écran éteint. Sur Brick standard, F1/F2 ne naviguent pas dans l'interface :
   elles sont mappées sur L3/R3 et envoyées à l'hôte. Sur Brick Pro, les clics
   de sticks sont L3/R3 et les touches Fn ne sont pas mappées. Dans les écrans
-  d'interface : D-pad, A, B. Le
+  d'interface : D-pad, A, B. L'écran Settings utilise en plus le D-pad
+  haut/bas pour choisir une ligne et gauche/droite pour changer sa valeur. Le
   jeu de boutons est neutralisé vers l'hôte pendant ces écrans. Start et Select
   restent des boutons de manette.
   Dans l'écran Devices, **B** quitte immédiatement l'application, sans confirmation.
@@ -526,6 +527,10 @@ Règles :
 - Le dernier profil utilisé est conservé dans `$BRICK_CONTROLLER_DATA/mode` :
   il sert de valeur par défaut au prochain appairage et survit à un
   redémarrage avant le réappairage.
+- Les réglages de l'écran Settings sont conservés dans
+  `$BRICK_CONTROLLER_DATA/preferences` sous la forme `dpad=dpad|stick` et
+  `rumble=off|low|mid|strong`. Un fichier absent ou une valeur inconnue retombe
+  sur D-pad et Strong.
 - Le profil d'un hôte **ne se modifie plus depuis Devices**. Le type de
   contrôleur se choisit uniquement lors d'un nouvel appairage, via l'écran
   Pairing puis X. Pour changer le type d'un hôte existant, l'oublier sur la
@@ -541,10 +546,19 @@ Règles :
   de sortie : aucune vibration.
 - Start et Select sont envoyés à l'hôte comme boutons de manette.
 - L'écran **Devices** est l'écran d'accueil. Il liste toujours les hôtes appairés
-  puis **Pair a new device**, même lorsqu'un hôte est connecté. Son footer
-  propose **B Quit**, **X Forget** et **A Connect**. Oublier un hôte demande
-  toujours confirmation. Il n'y a plus d'écran de détail ni de changement de
-  type de contrôleur pour un hôte déjà appairé.
+  puis **Pair a new device** et **Settings**, même lorsqu'un hôte est connecté.
+  Son footer propose **B Quit**, **X Forget** et **A Connect**. Oublier un hôte
+  demande toujours confirmation. Il n'y a plus d'écran de détail ni de
+  changement de type de contrôleur pour un hôte déjà appairé.
+- L'écran **Settings** propose **D-Pad Mode** (D-Pad ou Left Stick) et
+  **Rumble strength** (Off, Low, Mid, Strong, soit 0, 30, 60 et 90 % de la
+  demande de l'hôte). Haut/bas sélectionne la ligne, gauche/droite change la
+  valeur et enregistre immédiatement. B revient à Devices, curseur sur la ligne
+  Settings. Le footer affiche **B Back** à gauche et **L/R Change** à droite.
+  En mode Left Stick, le D-pad alimente le stick gauche côté hôte et le hat est
+  centré ; l'interface continue de naviguer avec le hat non transformé. Le
+  réglage de rumble multiplie toute la plage demandée par l'hôte, il ne
+  plafonne pas seulement les valeurs hautes.
 - Aucune connexion n'est automatique : au lancement, aucune adresse enregistrée
   n'est contactée. Ouvrir Devices coupe la connexion en cours, la tentative de
   connexion et l'appairage en cours (cible du reconnecteur effacée, discoverable
@@ -558,13 +572,16 @@ Règles :
   (1 s), mode indéterminé animé pour le splash et la connexion.
 - Menu+Start maintenu 1 s déconnecte et ouvre Devices depuis la vue Connected :
   aucun rapport HID n'est envoyé pendant le maintien. Un overlay
-  « Keep holding to disconnect… » montre la progression. Sur Brick standard,
+  « Hold to disconnect » avec « Release Menu + Start to cancel » montre la
+  progression. Sur Brick standard,
   F1/F2 ne sortent pas de cette vue et restent des boutons L3/R3 pour l'hôte.
   Sur Brick Pro, les clics de sticks sont L3/R3 et les Fn ne sont pas mappées.
 - Dans l'écran Devices, la navigation est celle de NextUI : D-pad, **A** pour
-  connecter l'hôte sélectionné (ou ouvrir **Pair a new device**) et **X** pour
-  l'oublier. Dans un sous-écran, B revient et A valide. Dans l'écran Devices, B
-  quitte immédiatement l'application. Les rapports HID sont neutralisés.
+  connecter l'hôte sélectionné (ou ouvrir **Pair a new device** et
+  **Settings**) et **X** pour l'oublier. Dans un sous-écran, B revient et A
+  valide. Dans l'écran Settings, haut/bas choisit la ligne et gauche/droite
+  change la valeur. Dans l'écran Devices, B quitte immédiatement l'application.
+  Les rapports HID sont neutralisés.
 - Seul l'écran Pairing rend l'adaptateur discoverable et accepte les canaux
   entrants ; Devices et ses sous-écrans les refusent.
 - Au retour à la vue controller, les rapports restent neutres jusqu'au
@@ -626,6 +643,11 @@ reconstruire avant le test.
 - SDP et canaux L2CAP ;
 - sous-commandes Switch, réponses 0x21 et lecture SPI ;
 - mapping des boutons et des axes ;
+- préférences : lecture tolérante de `preferences`, valeurs par défaut,
+  aller-retour, bouclage des valeurs ;
+- mode Left Stick : conversion du hat vers le stick gauche, conservation du
+  stick physique quand le hat est centré, priorité du hat ;
+- échelle du rumble : 0, 30, 60 et 90 % de la demande de l'hôte ;
 - restauration Bluetooth et chemins de secours.
 
 ### Tests sur matériel
@@ -637,9 +659,18 @@ reconstruire avant le test.
 - Brick standard : F1/F2 sans navigation, envoyées à l'hôte comme L3/R3 ;
 - Brick Pro : sticks gauche/droit, clics L3/R3, Fn 59/60 sans effet ;
 - Brick Pro : rumble plafonné à 2,5 V, puis 3,3 V restaurés à la sortie ;
-- maintien Menu+Start : overlay « Keep holding to disconnect… », HID neutralisé ;
+- maintien Menu+Start : overlay « Hold to disconnect » /
+  « Release Menu + Start to cancel », HID neutralisé ;
 - appui simple Menu+Start sur écran éteint : réveil sans envoi à l'hôte ;
 - navigation Devices/sous-écrans avec D-pad/A/B ;
+- ligne Settings sous Pair a new device, ouverture par A, retour par B avec le
+  curseur sur Settings ;
+- écran Settings : haut/bas sélectionne, gauche/droite change et enregistre,
+  footer B Back / L/R Change ;
+- mode Left Stick : D-pad vu comme stick gauche par l'hôte, hat centré, navigation
+  de l'interface toujours au D-pad ; stick physique conservé sur Brick Pro ;
+- Rumble strength : Off coupe le moteur, Low/Mid/Strong à 30/60/90 %, réglage
+  conservé après redémarrage ;
 - B dans l'écran Devices quitte immédiatement, sans confirmation ;
 - Écran Devices par défaut sans hôte, sans connexion automatique ;
 - Pair a new device reste listé et sélectionnable avec un hôte connecté ;

@@ -31,6 +31,8 @@ iPad. Pair it the way you would pair any other gamepad, then play.
   PlayStation and Switch.
 - A **Devices** home screen that lists your paired hosts. Nothing connects
   until you choose it.
+- A **Settings** screen under Devices: send the D-pad as a D-pad or as the left
+  stick, and choose the rumble strength between Off, Low, Mid and Strong.
 - A screen that gets out of the way: the panel turns off after 10 seconds while
   the gamepad keeps working. Tap **Menu+Start** once to wake it.
 - A status bar with the time, Bluetooth, Wi-Fi and battery state.
@@ -42,12 +44,19 @@ iPad. Pair it the way you would pair any other gamepad, then play.
 | Devices | Pairing | Connected |
 | --- | --- | --- |
 | <img src="brick-ui-mockups/actual/menu.png" alt="Devices screen" width="260"> | <img src="brick-ui-mockups/actual/pairing.png" alt="Pairing screen" width="260"> | <img src="brick-ui-mockups/actual/controller.png" alt="Connected screen" width="260"> |
-| Your paired hosts and **Pair a new device**. | The name, controller type and a waiting indicator. | The host, the active profile and the sleep hint. |
+| Your paired hosts, **Pair a new device** and **Settings**. | The name, controller type and a waiting indicator. | The host, the active profile and the sleep hint. |
 
 | Controller type | Forget a host | Changing type |
 | --- | --- | --- |
 | <img src="brick-ui-mockups/actual/profile.png" alt="Controller type screen" width="260"> | <img src="brick-ui-mockups/actual/confirm.png" alt="Forget confirmation" width="260"> | <img src="brick-ui-mockups/actual/changing-type.png" alt="Changing controller type popup" width="260"> |
 | Pick the identity for the next pairing. | Forgetting always asks for confirmation. | The Bluetooth session restarts with the new identity. |
+
+<p align="center">
+  <img src="brick-ui-mockups/actual/settings.png" alt="Settings screen" width="520">
+</p>
+
+The **Settings** screen opens from Devices. The D-pad selects a line,
+left/right changes its value, and **B** returns to Devices.
 
 ## Getting started
 
@@ -102,7 +111,10 @@ again.
 ## Everyday use
 
 - **Devices** is the home screen. It does not connect to a host on its own.
-- **A** connects the selected host or opens **Pair a new device**.
+- **A** connects the selected host, opens **Pair a new device** or opens
+  **Settings**.
+- In **Settings**, the D-pad up/down selects a line and left/right changes its
+  value. **B** returns to Devices.
 - **X** forgets the selected host after confirmation.
 - **B** quits the app from the Devices screen.
 - Hold **Menu+Start** for 1 second to disconnect and return to Devices.
@@ -136,6 +148,12 @@ does not appear in System Settings or in games built on that framework.
   shows an unsupported-device screen and exits without taking over Bluetooth.
 - Rumble works in Xbox, PlayStation and Switch modes. The PC profile has no
   output report, so PC hosts do not vibrate the handheld.
+- **D-Pad Mode** in Settings sends the D-pad as the left stick instead of the
+  hat. The app's own screens still navigate with the D-pad. On the Brick Pro the
+  physical sticks keep working; a D-pad press takes over while it is held.
+- **Rumble strength** scales the host's request: Off 0 %, Low 30 %, Mid 60 %,
+  Strong 90 %. The two Settings values are saved on the SD card and survive a
+  restart.
 - The Brick standard has no analog sticks, gyro, trackpads or back buttons.
   Sticks are reported centred for host compatibility. The Brick Pro adds two
   Hall-effect sticks and real L3/R3 clicks, with its Fn keys left unmapped.

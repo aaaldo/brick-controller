@@ -5,13 +5,16 @@
 //! Protocol tests live next to their profile module; screen previews live in
 //! `ui/preview.rs`.
 
-use super::settings::Settings;
-use super::view_model::{changing_type_modal, move_cursor, nav_dir, Dir, MenuRow};
+use super::settings::{Preferences, RumbleStrength, Settings};
+use super::view_model::{
+    changing_type_modal, move_cursor, nav_dir, view_for, Dir, MenuRow, Screen, SettingRow,
+};
 use super::{start_after_switch, StartScreen};
 use crate::bluetooth::{bluez, Address};
 use crate::i18n::Lang;
-use crate::input::Hat;
+use crate::input::{DpadMode, Hat};
 use crate::profiles::Profile;
+use crate::ui::View;
 use std::collections::HashMap;
 
 #[test]
@@ -32,7 +35,7 @@ fn cursors_wrap_and_an_empty_list_is_safe() {
 }
 
 #[test]
-fn the_menu_keeps_pairing_while_a_host_is_connected() {
+fn the_menu_keeps_pairing_and_settings_while_a_host_is_connected() {
     let settings = Settings {
         hosts: vec![bluez::Host {
             addr: Address([0x11; 6]),
@@ -41,11 +44,87 @@ fn the_menu_keeps_pairing_while_a_host_is_connected() {
         }],
         profiles: HashMap::new(),
         pairing: Profile::Pc,
+        preferences: Preferences::default(),
         error: None,
     };
     let rows = settings.rows();
     assert!(rows.iter().any(|row| matches!(row, MenuRow::Host(0))));
-    assert_eq!(rows.last(), Some(&MenuRow::Pair));
+    assert!(rows.contains(&MenuRow::Pair));
+    assert_eq!(rows.last(), Some(&MenuRow::Settings));
+}
+
+#[test]
+fn preferences_default_to_the_hat_and_strong_rumble() {
+    let preferences = Preferences::default();
+    assert_eq!(preferences.dpad, DpadMode::Dpad);
+    assert_eq!(preferences.rumble, RumbleStrength::Strong);
+}
+
+#[test]
+fn preferences_round_trip_and_ignore_unknown_values() {
+    let preferences = Preferences::from_text("dpad=stick\nrumble=low\nfuture=value\n");
+    assert_eq!(preferences.dpad, DpadMode::LeftStick);
+    assert_eq!(preferences.rumble, RumbleStrength::Low);
+    assert_eq!(preferences.to_text(), "dpad=stick\nrumble=low\n");
+
+    let fallback = Preferences::from_text("dpad=sideways\nrumble=MAX\n");
+    assert_eq!(fallback, Preferences::default());
+}
+
+#[test]
+fn settings_rows_show_the_current_values() {
+    let settings = Settings {
+        hosts: Vec::new(),
+        profiles: HashMap::new(),
+        pairing: Profile::Pc,
+        preferences: Preferences {
+            dpad: DpadMode::LeftStick,
+            rumble: RumbleStrength::Low,
+        },
+        error: None,
+    };
+    let view = view_for(
+        &Screen::Settings { cursor: 1 },
+        &settings,
+        None,
+        Profile::Pc,
+        None,
+        Lang::En,
+    );
+    let View::Settings { rows } = view else {
+        panic!("expected the Settings view");
+    };
+    assert_eq!(rows[0].label, "D-Pad Mode");
+    assert_eq!(rows[0].trailing, "Left Stick");
+    assert!(!rows[0].selected);
+    assert_eq!(rows[1].label, "Rumble strength");
+    assert_eq!(rows[1].trailing, "Low");
+    assert!(rows[1].selected);
+}
+
+#[test]
+fn rumble_strength_scales_the_host_request() {
+    assert_eq!(RumbleStrength::Off.scaled(255), 0);
+    assert_eq!(RumbleStrength::Low.scaled(255), 76);
+    assert_eq!(RumbleStrength::Mid.scaled(255), 153);
+    assert_eq!(RumbleStrength::Strong.scaled(255), 229);
+    assert_eq!(RumbleStrength::Strong.scaled(0), 0);
+}
+
+#[test]
+fn settings_values_cycle_and_wrap() {
+    let mut preferences = Preferences::default();
+    preferences.cycle(SettingRow::Dpad, 1);
+    assert_eq!(preferences.dpad, DpadMode::LeftStick);
+    preferences.cycle(SettingRow::Dpad, 1);
+    assert_eq!(preferences.dpad, DpadMode::Dpad);
+
+    preferences.cycle(SettingRow::Rumble, -1);
+    assert_eq!(preferences.rumble, RumbleStrength::Mid);
+    for _ in 0..4 {
+        preferences.cycle(SettingRow::Rumble, 1);
+    }
+    assert_eq!(preferences.rumble, RumbleStrength::Mid, "four steps wrap");
 }
 
 #[test]

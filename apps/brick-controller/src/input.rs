@@ -51,6 +51,51 @@ impl PadState {
     pub fn buttons_bits(&self) -> u16 {
         self.buttons
     }
+
+    /// Return the state a host should see under `mode`.
+    ///
+    /// In `LeftStick`, a pressed hat drives the left stick and the hat reports
+    /// centred. The physical stick stays in place while the hat is centred;
+    /// the hat wins when both move, because a D-pad press is deliberate while
+    /// a resting analog stick can drift. The app's own navigation always reads
+    /// the untransformed hat.
+    pub fn with_dpad_mode(self, mode: DpadMode) -> Self {
+        if mode != DpadMode::LeftStick {
+            return self;
+        }
+        let (x, y) = match self.hat {
+            Hat::Up => (128, 0),
+            Hat::UpRight => (255, 0),
+            Hat::Right => (255, 128),
+            Hat::DownRight => (255, 255),
+            Hat::Down => (128, 255),
+            Hat::DownLeft => (0, 255),
+            Hat::Left => (0, 128),
+            Hat::UpLeft => (0, 0),
+            Hat::Centred => return self,
+        };
+        let mut state = self;
+        state.sticks[0] = x;
+        state.sticks[1] = y;
+        state.hat = Hat::Centred;
+        state
+    }
+}
+
+/// How the D-pad reaches the host.
+///
+/// The physical hat remains the interface's navigation control; only the state
+/// handed to the profiles changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DpadMode {
+    /// Report the hat switch as a hat.
+    Dpad,
+    /// Report the hat as left-stick movement, with the hat centred.
+    LeftStick,
+}
+
+impl DpadMode {
+    pub const ALL: [Self; 2] = [Self::Dpad, Self::LeftStick];
 }
 
 /// A physical control, numbered as the generic HID descriptor counts it.
@@ -205,5 +250,57 @@ mod tests {
         assert_eq!(scale(255, 0, 255), 255);
         assert_eq!(scale(999, 0, 255), 255, "clamped");
         assert_eq!(scale(5, 0, 0), 128, "a range that says nothing");
+    }
+
+    #[test]
+    fn dpad_mode_keeps_the_hat_by_default() {
+        let state = PadState {
+            hat: Hat::Left,
+            ..PadState::default()
+        };
+        assert_eq!(state.with_dpad_mode(DpadMode::Dpad), state);
+    }
+
+    #[test]
+    fn left_stick_mode_turns_the_hat_into_the_left_stick() {
+        let state = PadState {
+            hat: Hat::Up,
+            ..PadState::default()
+        };
+        let state = state.with_dpad_mode(DpadMode::LeftStick);
+        assert_eq!(state.hat, Hat::Centred);
+        assert_eq!(state.sticks[..2], [128, 0], "up is the top of the axis");
+
+        let state = PadState {
+            hat: Hat::DownRight,
+            ..PadState::default()
+        };
+        assert_eq!(
+            state.with_dpad_mode(DpadMode::LeftStick).sticks[..2],
+            [255, 255]
+        );
+    }
+
+    #[test]
+    fn a_centred_hat_keeps_the_physical_stick() {
+        let mut state = PadState::default();
+        state.sticks[0] = 64;
+        state.sticks[1] = 192;
+        assert_eq!(state.with_dpad_mode(DpadMode::LeftStick), state);
+    }
+
+    #[test]
+    fn the_hat_wins_when_the_stick_moves_too() {
+        let mut state = PadState {
+            hat: Hat::Down,
+            ..PadState::default()
+        };
+        state.sticks[0] = 64;
+        state.sticks[1] = 192;
+        assert_eq!(
+            state.with_dpad_mode(DpadMode::LeftStick).sticks[..2],
+            [128, 255],
+            "a deliberate D-pad press overrides the analog stick"
+        );
     }
 }

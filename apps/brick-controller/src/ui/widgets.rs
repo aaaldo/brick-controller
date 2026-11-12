@@ -411,7 +411,7 @@ pub(super) fn draw_hold(
         canvas,
         tr(lang, Key::HoldTitle),
         w / 2,
-        box_y + s(canvas, 72),
+        box_y + s(canvas, 82),
         ITEM_SIZE,
         theme.text,
     );
@@ -419,7 +419,7 @@ pub(super) fn draw_hold(
         canvas,
         tr(lang, Key::HoldMessage),
         w / 2,
-        box_y + s(canvas, 118),
+        box_y + s(canvas, 140),
         SMALL_SIZE,
         hint_text(theme),
     );
@@ -429,7 +429,7 @@ pub(super) fn draw_hold(
         canvas,
         theme,
         (w - bar_w) / 2,
-        box_y + s(canvas, 178),
+        box_y + s(canvas, 194),
         bar_w,
         bar_h,
         Loading::Determinate(progress),
