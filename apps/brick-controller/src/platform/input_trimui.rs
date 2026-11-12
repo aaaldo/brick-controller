@@ -27,11 +27,13 @@ const EV_KEY: u16 = 1;
 const EV_ABS: u16 = 3;
 
 const BTN_SOUTH: u16 = 304;
-/// The Brick's front function keys, later mapped to L3 and R3.
+/// The last code of the contiguous gamepad range.
 ///
-/// `BTN_THUMBR` is the last code in the contiguous gamepad range, so the
-/// mapper uses `BTN_SOUTH..=BTN_THUMBR` to recognise every button without
-/// listing each one; the two exceptions are handled by name below.
+/// On the Brick, 317/318 are the front function keys, mapped to L3/R3 because
+/// the standard shell has no stick clicks. On the Brick Pro they are the real
+/// L3/R3 buttons; its Fn keys report KEY_F1/KEY_F2 (59/60), outside this
+/// range, and stay unmapped. `BTN_THUMBR` lets the mapper recognise the whole
+/// gamepad range without listing each code; X and Y are handled by name below.
 const BTN_THUMBR: u16 = 318;
 /// The handheld's X (top) and Y (left) buttons.
 const KEY_X: u16 = 308;
@@ -363,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn front_function_keys_map_to_l3_and_r3() {
+    fn stick_clicks_and_front_keys_map_to_l3_and_r3() {
         let mut m = Mapper::default();
         feed(&mut m, &[(EV_KEY, 317, 1)]);
         assert!(m.state.pressed(Button::L3));
@@ -372,6 +374,17 @@ mod tests {
         assert!(m.state.pressed(Button::R3));
         feed(&mut m, &[(EV_KEY, 318, 0)]);
         assert!(!m.state.pressed(Button::R3));
+    }
+
+    #[test]
+    fn brickpro_fn_keys_do_not_become_gamepad_buttons() {
+        let mut m = Mapper::default();
+        feed(&mut m, &[(EV_KEY, 59, 1), (EV_KEY, 60, 1)]);
+        assert_eq!(
+            m.state,
+            PadState::default(),
+            "the Brick Pro's Fn keys report KEY_F1/KEY_F2, not L3/R3"
+        );
     }
 
     #[test]
