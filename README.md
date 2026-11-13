@@ -145,7 +145,8 @@ every exit path, including a crash.
 - **A** connects the selected host, opens **Pair a new device**, starts the
   wired PC mode, or opens **Settings**.
 - In **Settings**, the D-pad up/down selects a line and left/right changes its
-  value. **B** returns to Devices.
+  value. **B** returns to Devices. When **Settings** is selected in Devices, the
+  footer action reads **A Open** instead of **A Connect**.
 - **X** forgets the selected host after confirmation. It is only offered on a
   host row; Pairing, the wired mode and Settings have no identity to forget.
 - **B** quits the app from the Devices screen, or leaves the wired waiting

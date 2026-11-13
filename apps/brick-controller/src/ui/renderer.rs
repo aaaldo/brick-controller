@@ -224,6 +224,7 @@ mod tests {
             view: View::Menu {
                 rows: Vec::new(),
                 can_forget: false,
+                open: false,
             },
             status: status(),
             modal: None,

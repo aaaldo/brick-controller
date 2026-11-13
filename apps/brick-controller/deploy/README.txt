@@ -65,7 +65,7 @@ Controls
 --------
 Devices screen:
   A  Connect the selected host, open Pair a new device, start Wired connection,
-     or open Settings
+     or open Settings (the label changes to Open on the Settings row)
   X  Forget the selected host (confirmation required; host rows only)
   B  Quit the app
 

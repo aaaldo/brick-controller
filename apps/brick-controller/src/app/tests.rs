@@ -82,6 +82,29 @@ fn forget_is_offered_only_for_a_paired_host() {
 }
 
 #[test]
+fn only_settings_opens_instead_of_connecting() {
+    let settings = settings_with_one_host();
+    let open = |cursor| {
+        let view = view_for(
+            &Screen::Menu { cursor },
+            &settings,
+            None,
+            Profile::Pc,
+            None,
+            Lang::En,
+        );
+        match view {
+            View::Menu { open, .. } => open,
+            other => panic!("expected a menu, got {other:?}"),
+        }
+    };
+    assert!(!open(0), "a host row connects");
+    assert!(!open(1), "Pairing still uses the Connect label");
+    assert!(!open(2), "the wired row starts a connection");
+    assert!(open(3), "Settings opens with the Open label");
+}
+
+#[test]
 fn the_wired_views_name_the_pc_identity_and_usb_transport() {
     match wired_waiting() {
         View::WiredWaiting {

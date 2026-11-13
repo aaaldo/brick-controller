@@ -28,8 +28,11 @@ pub enum View {
     Menu {
         rows: Vec<Row>,
         /// Whether the selected row is a paired host, and may therefore be
-        /// forgotten. Pairing and the wired mode have nothing to forget.
+        /// forgotten. Pairing, the wired mode and Settings have nothing to
+        /// forget.
         can_forget: bool,
+        /// Whether A opens a screen instead of connecting to a host.
+        open: bool,
     },
     Settings {
         rows: Vec<Row>,
@@ -92,14 +95,19 @@ pub fn draw(
             draw_controller(canvas, fonts, theme, lang, host, profile, *wired);
             disconnect_hint(canvas, fonts, theme, lang);
         }
-        View::Menu { rows, can_forget } => {
+        View::Menu {
+            rows,
+            can_forget,
+            open,
+        } => {
             header(canvas, fonts, theme, status, tr(lang, Key::Devices));
             rows_at(canvas, fonts, theme, rows, 120);
             let mut actions = Vec::new();
             if *can_forget {
                 actions.push(item("X", tr(lang, Key::Forget)));
             }
-            actions.push(item("A", tr(lang, Key::Connect)));
+            let action = if *open { Key::Open } else { Key::Connect };
+            actions.push(item("A", tr(lang, action)));
             footer(
                 canvas,
                 fonts,

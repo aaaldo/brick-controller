@@ -129,9 +129,12 @@ pub fn view_for(
         Screen::Menu { cursor } => {
             let rows = settings.rows();
             let cursor = (*cursor).min(rows.len().saturating_sub(1));
-            // Forget only makes sense for a paired host. Pairing and the wired
-            // mode have no stored identity to remove.
+            // Forget only makes sense for a paired host. Pairing, the wired
+            // mode and Settings have no stored identity to remove.
             let can_forget = matches!(rows.get(cursor), Some(MenuRow::Host(_)));
+            // Settings opens a screen; the other rows connect, pair or switch
+            // transport.
+            let open = matches!(rows.get(cursor), Some(MenuRow::Settings));
             let start = cursor.saturating_sub(4);
             let rows = rows
                 .iter()
@@ -165,7 +168,11 @@ pub fn view_for(
                     MenuRow::Settings => Row::new(tr(lang, Key::Settings), "", index == cursor),
                 })
                 .collect();
-            View::Menu { rows, can_forget }
+            View::Menu {
+                rows,
+                can_forget,
+                open,
+            }
         }
         Screen::Settings { cursor } => {
             let cursor = (*cursor).min(SettingRow::ALL.len() - 1);

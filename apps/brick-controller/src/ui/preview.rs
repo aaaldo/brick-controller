@@ -59,6 +59,22 @@ fn preview_wired_rows() -> Vec<Row> {
     rows
 }
 
+/// The menu with Settings selected, to check that the primary action reads
+/// `Open` instead of `Connect`.
+fn preview_settings_rows() -> Vec<Row> {
+    let mut rows = preview_menu_rows(true);
+    for row in &mut rows {
+        row.selected = false;
+    }
+    if let Some(settings) = rows
+        .iter_mut()
+        .find(|row| row.label == tr(Lang::En, Key::Settings))
+    {
+        settings.selected = true;
+    }
+    rows
+}
+
 /// `BRICK_CONTROLLER_PREVIEW=dir cargo test preview` writes every screen
 /// as a PNG, so the layout can be checked without the device.
 ///
@@ -100,6 +116,7 @@ fn preview_every_screen() {
             View::Menu {
                 rows: preview_menu_rows(true),
                 can_forget: true,
+                open: false,
             },
             preview_status(true),
         ),
@@ -108,6 +125,7 @@ fn preview_every_screen() {
             View::Menu {
                 rows: preview_menu_rows(false),
                 can_forget: true,
+                open: false,
             },
             preview_status(true),
         ),
@@ -116,6 +134,16 @@ fn preview_every_screen() {
             View::Menu {
                 rows: preview_wired_rows(),
                 can_forget: false,
+                open: false,
+            },
+            preview_status(true),
+        ),
+        (
+            "menu-settings",
+            View::Menu {
+                rows: preview_settings_rows(),
+                can_forget: false,
+                open: true,
             },
             preview_status(true),
         ),
@@ -226,6 +254,7 @@ fn preview_every_screen() {
         &View::Menu {
             rows: preview_menu_rows(true),
             can_forget: true,
+            open: false,
         },
         &preview_status(true),
         Some(&modal),
@@ -253,6 +282,7 @@ fn preview_every_screen() {
         &View::Menu {
             rows: preview_menu_rows(true),
             can_forget: true,
+            open: false,
         },
         &preview_status(true),
         Some(&connecting),
@@ -304,6 +334,7 @@ fn preview_every_screen() {
         &View::Menu {
             rows: Vec::new(),
             can_forget: false,
+            open: false,
         },
         &preview_status(true),
         Some(&returning),

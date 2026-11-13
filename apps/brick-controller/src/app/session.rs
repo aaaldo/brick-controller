@@ -282,6 +282,7 @@ pub(crate) fn session(
             View::Menu {
                 rows: Vec::new(),
                 can_forget: false,
+                open: false,
             },
             Some(returning_to_devices_modal(lang)),
         );

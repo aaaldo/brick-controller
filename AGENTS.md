@@ -566,10 +566,11 @@ Règles :
 - L'écran **Devices** est l'écran d'accueil. Il liste toujours les hôtes appairés,
   puis **Pair a new device**, puis **Wired connection**, puis **Settings**, même
   lorsqu'un hôte est connecté. Son footer propose **B Quit**, **X Forget** et
-  **A Connect** ; **X Forget** n'est affiché que sur une ligne d'hôte, jamais sur
-  Pairing, Wired ni Settings. Oublier un hôte demande toujours confirmation. Il
-  n'y a plus d'écran de détail ni de changement de type de contrôleur pour un
-  hôte déjà appairé.
+  **A Connect** ; sur la ligne **Settings**, l'action devient **A Open**.
+  **X Forget** n'est affiché que sur une ligne d'hôte, jamais sur Pairing, Wired
+  ni Settings. Oublier un hôte demande toujours confirmation. Il n'y a plus
+  d'écran de détail ni de changement de type de contrôleur pour un hôte déjà
+  appairé.
 - L'écran **Settings** propose **D-Pad Mode** (D-Pad ou Left Stick) et
   **Rumble strength** (Off, Low, Mid, Strong, soit 0, 30, 60 et 90 % de la
   demande de l'hôte). Haut/bas sélectionne la ligne, gauche/droite change la
