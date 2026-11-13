@@ -1,20 +1,22 @@
 # Brick Controller
 
-**Turn a TrimUI Brick or Brick Pro into a Bluetooth gamepad. No driver on the
-host.**
+**Turn a TrimUI Brick or Brick Pro into a Bluetooth or wired USB gamepad. No
+driver on the host.**
 
 <p align="center">
   <img src="brick-ui-mockups/actual/menu.png" alt="Brick Controller Devices screen" width="820">
 </p>
 
 Brick Controller is a NextUI Pak. It makes the handheld appear as a standard
-Bluetooth HID controller to a PC, Mac, Linux/SteamOS machine, Android device or
-iPad. Pair it the way you would pair any other gamepad, then play.
+HID controller to a PC, Mac, Linux/SteamOS machine, Android device or iPad.
+Pair it over Bluetooth, or connect the bottom USB-C port for the wired PC mode,
+then play.
 
 > **Status.** The Brick is supported. The Brick Pro uses the same `tg5040`
 > package and code path, but has not yet been validated on Brick Pro hardware.
 > Smart Pro and `tg5050` are not supported yet: the app refuses to start on
-> them. Bluetooth only; USB HID is not available yet.
+> them. Bluetooth supports PC, Xbox, PlayStation and Switch identities; the
+> wired mode is PC only and is still in development.
 
 > **Found a problem?** Brick Controller is a community Pak; NextUI maintainers
 > do not provide support for it. Open a bug report from the repository's
@@ -27,6 +29,9 @@ iPad. Pair it the way you would pair any other gamepad, then play.
   Menu. On the Brick standard, F1/F2 work as L3/R3. On the Brick Pro, the two
   Hall-effect sticks and the real L3/R3 clicks follow the same input path; its
   Fn keys are not mapped.
+- A wired PC mode over the bottom USB-C port: the same pad appears as a
+  standard HID gamepad without pairing. It is PC only, and ADB is unavailable
+  while the wired session runs.
 - Four controller identities to choose from when pairing: PC, Xbox,
   PlayStation and Switch.
 - A **Devices** home screen that lists your paired hosts. Nothing connects
@@ -44,12 +49,16 @@ iPad. Pair it the way you would pair any other gamepad, then play.
 | Devices | Pairing | Connected |
 | --- | --- | --- |
 | <img src="brick-ui-mockups/actual/menu.png" alt="Devices screen" width="260"> | <img src="brick-ui-mockups/actual/pairing.png" alt="Pairing screen" width="260"> | <img src="brick-ui-mockups/actual/controller.png" alt="Connected screen" width="260"> |
-| Your paired hosts, **Pair a new device** and **Settings**. | The name, controller type and a waiting indicator. | The host, the active profile and the sleep hint. |
+| Your paired hosts, **Pair a new device**, **Wired connection** and **Settings**. | The name, controller type and a waiting indicator. | The host, the active profile and the sleep hint. |
 
 | Controller type | Forget a host | Changing type |
 | --- | --- | --- |
 | <img src="brick-ui-mockups/actual/profile.png" alt="Controller type screen" width="260"> | <img src="brick-ui-mockups/actual/confirm.png" alt="Forget confirmation" width="260"> | <img src="brick-ui-mockups/actual/changing-type.png" alt="Changing controller type popup" width="260"> |
 | Pick the identity for the next pairing. | Forgetting always asks for confirmation. | The Bluetooth session restarts with the new identity. |
+
+The wired mode has its own waiting screen, using the Pairing layout with the
+identity and a waiting indicator, and a connected screen titled **Connected**
+with the host `PC (USB)` and `Profile PC · USB HID`.
 
 <p align="center">
   <img src="brick-ui-mockups/actual/settings.png" alt="Settings screen" width="520">
@@ -63,11 +72,14 @@ left/right changes its value, and **B** returns to Devices.
 ### What you need
 
 - A TrimUI Brick or Brick Pro running NextUI (`tg5040`).
-- Bluetooth enabled in NextUI.
+- Bluetooth enabled in NextUI. The app starts its Bluetooth session before
+  showing **Devices**, so this is required even for the wired mode.
 - The `Brick Controller.pak` folder, or the release zip.
+- A USB-C **data** cable for the wired mode. Use the **bottom** USB-C port; the
+  top port is a USB host port.
 
-A USB-C cable is only needed for development over ADB or SSH. Normal use is
-wireless.
+Normal Bluetooth use needs no cable. A cable is also needed for development over
+ADB or SSH; ADB is unavailable while a wired session runs.
 
 ### Install
 
@@ -108,16 +120,39 @@ The type is chosen for the next pairing. An already paired host keeps the
 identity it first saw; to change it, forget the host on both sides and pair
 again.
 
+### Use the wired PC mode
+
+1. Open **Brick Controller** so **Devices** is visible.
+2. Select **Wired connection** and press **A**.
+3. Connect the **bottom** USB-C port to the PC with a data cable.
+4. The screen switches to **Connected** and names the host `PC (USB)`.
+5. Hold **Menu+Start** for 1 second to return to Devices. ADB and the NextUI
+   Bluetooth state are restored.
+
+The wired mode publishes the PC HID descriptor with a nine-byte report. Windows,
+Linux/SteamOS, Android and applications that read HID directly see a standard
+gamepad. macOS does not expose a generic HID gamepad to GameController, so use a
+Bluetooth profile on Apple hosts. The wired mode is PC only; Xbox, PlayStation
+and Switch identities remain Bluetooth.
+
+While the wired session runs, ADB is unavailable: the transport temporarily
+borrows the USB gadget NextUI uses for it. The wrapper restores the gadget on
+every exit path, including a crash.
+
 ## Everyday use
 
 - **Devices** is the home screen. It does not connect to a host on its own.
-- **A** connects the selected host, opens **Pair a new device** or opens
-  **Settings**.
+- **A** connects the selected host, opens **Pair a new device**, starts the
+  wired PC mode, or opens **Settings**.
 - In **Settings**, the D-pad up/down selects a line and left/right changes its
-  value. **B** returns to Devices.
-- **X** forgets the selected host after confirmation.
-- **B** quits the app from the Devices screen.
-- Hold **Menu+Start** for 1 second to disconnect and return to Devices.
+  value. **B** returns to Devices. When **Settings** is selected in Devices, the
+  footer action reads **A Open** instead of **A Connect**.
+- **X** forgets the selected host after confirmation. It is only offered on a
+  host row; Pairing, the wired mode and Settings have no identity to forget.
+- **B** quits the app from the Devices screen, or leaves the wired waiting
+  screen.
+- Hold **Menu+Start** for 1 second to disconnect and return to Devices, in both
+  Bluetooth and wired modes.
 - Tap **Menu** on the controller view to send Home/Guide.
 - After 10 seconds, the panel turns off. Tap **Menu+Start** once to wake it;
   this does not send the chord to the host.
@@ -139,11 +174,26 @@ name, not the internal profile name.
 
 On Apple hosts, use **Xbox**, **PlayStation** or **Switch**. macOS does not
 expose a generic HID gamepad to its GameController framework, so the PC profile
-does not appear in System Settings or in games built on that framework.
+does not appear in System Settings or in games built on that framework. This
+also applies to the wired PC mode.
+
+The wired mode is independent of the Bluetooth profile: it always publishes the
+PC HID identity. Choosing **Wired connection** does not change the type stored
+for a host or the identity offered to the next Bluetooth pairing.
 
 ## Good to know
 
-- **Bluetooth only.** USB HID is not part of this release.
+- **Wired mode is PC only.** It uses the bottom USB-C port and a data cable.
+  PlayStation, Switch and Xbox controllers remain Bluetooth-only.
+- **ADB is unavailable during a wired session.** The app borrows the USB gadget
+  NextUI uses for ADB and restores it on exit. If ADB does not come back after a
+  crash, relaunch the Pak or reboot the handheld.
+- **Bluetooth must be enabled to open the app**, including for the wired mode:
+  **Devices** is part of the Bluetooth session. The daemon is handed back to
+  NextUI while USB runs and restarted on return.
+- The wired device identifies itself with a pid.codes USB identity. Development
+  builds use an official pid.codes test PID; release builds will use the
+  assigned product PID.
 - The Smart Pro and Smart Pro S are not supported yet. On those models the app
   shows an unsupported-device screen and exits without taking over Bluetooth.
 - Rumble works in Xbox, PlayStation and Switch modes. The PC profile has no
@@ -215,6 +265,15 @@ or run:
 /mnt/SDCARD/.system/tg5040/etc/bluetooth/bt_init.sh start
 ```
 
+If ADB does not come back after a wired session, quit and relaunch the Pak. The
+launch wrapper runs the binary's `restore` subcommand, which puts the NextUI USB
+gadget and its function links back before restarting Bluetooth. A reboot is the
+fallback; it recreates the gadget from scratch.
+
+If the host no longer sees the Brick at all after several wired sessions,
+unplug the USB-C cable and plug it back in. Some hosts do not re-enumerate after
+repeated gadget unbinds even though the Brick side is restored.
+
 If the panel stays dark, press **Menu+Start** once to wake it. To restore
 NextUI's own brightness and volume settings, run:
 
@@ -234,6 +293,7 @@ archive check also needs `jq` and `unzip`:
 export PATH="$HOME/.cargo/bin:$PATH"
 rustup target add aarch64-unknown-linux-musl
 cargo fmt --all
+cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo build --release --target aarch64-unknown-linux-musl -p brick-controller
 VERSION=v1.1.0 ./apps/brick-controller/deploy/package.sh
@@ -241,6 +301,12 @@ VERSION=v1.1.0 ./apps/brick-controller/deploy/package.sh
 ```
 
 The binary is static; no Rust runtime is needed on the handheld.
+
+Development builds identify the wired device with the pid.codes test PID
+`0x1209:0x0002`. That identity is for development only: replace `USB_PRODUCT`
+in `apps/brick-controller/src/usb.rs` with the assigned product PID before
+building a release archive. Hosts cache the pair, so a release built with the
+test PID would look like a different device after the switch.
 
 ## Credits and license
 

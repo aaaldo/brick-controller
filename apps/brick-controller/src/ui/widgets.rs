@@ -48,6 +48,22 @@ pub struct Modal {
     pub loading: bool,
 }
 
+impl Modal {
+    /// A blocking popup with an indeterminate bar and no actions.
+    ///
+    /// The session changes it when the work finishes; the user cannot dismiss
+    /// it. Used for every in-app transition that must not be interrupted.
+    pub fn loading(title: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            message: String::new(),
+            confirm: "",
+            destructive: false,
+            loading: true,
+        }
+    }
+}
+
 /// Draw the visible rows as one continuous list.
 ///
 /// Scrolling is decided by `view_for`, which keeps the selected row in a
@@ -138,14 +154,14 @@ pub(super) fn footer(
 
 pub(super) fn group_width(canvas: &Canvas, fonts: &mut Fonts, items: &[FooterItem]) -> i32 {
     let gap = s(canvas, 15);
-    let outer = s(canvas, 15);
-    let mut width = outer * 2;
+    let pad = s(canvas, 15);
+    let mut width = pad * 2;
     for (i, item) in items.iter().enumerate() {
         if i > 0 {
             width += gap;
         }
         width += key_width(canvas, fonts, item.key) + gap;
-        width += fonts.measure(item.label, HINT_SIZE) + gap;
+        width += fonts.measure(item.label, HINT_SIZE);
     }
     width
 }
@@ -208,7 +224,7 @@ pub(super) fn draw_group(
     round_rect(canvas, x, y, width, h, h / 2, outer.fill);
     let gap = s(canvas, 15);
     let mut cx = x + gap;
-    for item in items {
+    for (index, item) in items.iter().enumerate() {
         cx += draw_key(canvas, fonts, theme, item.key, cx, y + gap) + gap;
         fonts.draw(
             canvas,
@@ -218,7 +234,10 @@ pub(super) fn draw_group(
             HINT_SIZE,
             outer.text,
         );
-        cx += fonts.measure(item.label, HINT_SIZE) + gap;
+        cx += fonts.measure(item.label, HINT_SIZE);
+        if index + 1 < items.len() {
+            cx += gap;
+        }
     }
     width
 }

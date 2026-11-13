@@ -20,6 +20,9 @@ use crate::ui::{Modal, Row, View};
 pub enum MenuRow {
     Host(usize),
     Pair,
+    /// The wired PC HID mode, below pairing and independent of the Bluetooth
+    /// profile each host cached.
+    Wired,
     Settings,
 }
 
@@ -121,10 +124,17 @@ pub fn view_for(
         Screen::Controller => View::Controller {
             host: link.map(|l| l.name.clone()).unwrap_or_default(),
             profile: profile.label(),
+            wired: false,
         },
         Screen::Menu { cursor } => {
             let rows = settings.rows();
             let cursor = (*cursor).min(rows.len().saturating_sub(1));
+            // Forget only makes sense for a paired host. Pairing, the wired
+            // mode and Settings have no stored identity to remove.
+            let can_forget = matches!(rows.get(cursor), Some(MenuRow::Host(_)));
+            // Settings opens a screen; the other rows connect, pair or switch
+            // transport.
+            let open = matches!(rows.get(cursor), Some(MenuRow::Settings));
             let start = cursor.saturating_sub(4);
             let rows = rows
                 .iter()
@@ -150,10 +160,19 @@ pub fn view_for(
                         settings.pairing.label(),
                         index == cursor,
                     ),
+                    MenuRow::Wired => Row::new(
+                        tr(lang, Key::WiredConnection),
+                        tr(lang, Key::WiredDetail),
+                        index == cursor,
+                    ),
                     MenuRow::Settings => Row::new(tr(lang, Key::Settings), "", index == cursor),
                 })
                 .collect();
-            View::Menu { rows }
+            View::Menu {
+                rows,
+                can_forget,
+                open,
+            }
         }
         Screen::Settings { cursor } => {
             let cursor = (*cursor).min(SettingRow::ALL.len() - 1);
@@ -191,6 +210,33 @@ pub fn view_for(
     }
 }
 
+/// The wired mode's waiting screen: the PC identity a host will see while the
+/// bottom device port waits for enumeration.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn wired_waiting() -> View {
+    View::WiredWaiting {
+        identity: Profile::Pc.bt_name().into(),
+        controller_type: Profile::Pc.label(),
+    }
+}
+
+/// The wired mode's connected screen. It has no Bluetooth `Link` to name the
+/// host, so the USB transport supplies a fixed host label.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn wired_controller(lang: Lang) -> View {
+    View::Controller {
+        host: tr(lang, Key::WiredHost).into(),
+        profile: Profile::Pc.label(),
+        wired: true,
+    }
+}
+
+/// The blocking popup shown while the wired session hands the adapter back and
+/// the Bluetooth session starts again.
+pub fn returning_to_devices_modal(lang: Lang) -> Modal {
+    Modal::loading(tr(lang, Key::ReturningToDevices))
+}
+
 /// The user-facing value of the D-pad setting.
 fn dpad_label(lang: Lang, mode: DpadMode) -> &'static str {
     tr(
@@ -220,13 +266,7 @@ fn rumble_label(lang: Lang, strength: RumbleStrength) -> &'static str {
 /// `draw_modal` uses the title and an indeterminate bar for a loading modal,
 /// so the message is the title rather than the body.
 pub fn changing_type_modal(lang: Lang) -> Modal {
-    Modal {
-        title: tr(lang, Key::ChangingControllerType).into(),
-        message: String::new(),
-        confirm: "",
-        destructive: false,
-        loading: true,
-    }
+    Modal::loading(tr(lang, Key::ChangingControllerType))
 }
 
 /// Build the blocking popup for the modal state.
@@ -257,13 +297,7 @@ pub fn modal_view(modal: &ModalState, settings: &Settings, lang: Lang) -> Modal 
                 .find(|host| host.addr == *addr)
                 .map(|host| host.name.clone())
                 .unwrap_or_else(|| addr.to_string());
-            Modal {
-                title: fill(tr(lang, Key::ConnectingTo), &[("name", &name)]),
-                message: String::new(),
-                confirm: "",
-                destructive: false,
-                loading: true,
-            }
+            Modal::loading(fill(tr(lang, Key::ConnectingTo), &[("name", &name)]))
         }
     }
 }

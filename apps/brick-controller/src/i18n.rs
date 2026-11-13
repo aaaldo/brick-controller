@@ -30,6 +30,9 @@ pub enum Lang {
 macro_rules! keys {
     ($($key:ident),+ $(,)?) => {
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        // The wired transport and its strings are only compiled on the device;
+        // the host build still compiles the menu and view code.
+        #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
         pub enum Key {
             $($key),+
         }
@@ -52,6 +55,7 @@ keys! {
     Quit,
     Forget,
     Connect,
+    Open,
     Cancel,
     Choose,
     Back,
@@ -70,6 +74,12 @@ keys! {
     HoldMessage,
     Offline,
     PairNew,
+    WiredConnection,
+    WiredDetail,
+    WiredHost,
+    ProfileLineUsb,
+    WaitingForUsbHost,
+    ReturningToDevices,
     Settings,
     DpadMode,
     Dpad,
@@ -87,6 +97,7 @@ keys! {
     StartingBluetooth,
     ErrorTitle,
     BluetoothActivationError,
+    UsbActivationError,
     UnsupportedDeviceTitle,
     UnsupportedDeviceMessage,
 }
@@ -122,6 +133,7 @@ fn english(key: Key) -> &'static str {
         Key::Quit => "Quit",
         Key::Forget => "Forget",
         Key::Connect => "Connect",
+        Key::Open => "Open",
         Key::Cancel => "Cancel",
         Key::Choose => "Choose",
         Key::Back => "Back",
@@ -142,6 +154,12 @@ fn english(key: Key) -> &'static str {
         Key::HoldMessage => "Release Menu + Start to cancel",
         Key::Offline => "Offline",
         Key::PairNew => "Pair a new device",
+        Key::WiredConnection => "Wired connection",
+        Key::WiredDetail => "PC · USB",
+        Key::WiredHost => "PC (USB)",
+        Key::ProfileLineUsb => "Profile {profile} · USB HID",
+        Key::WaitingForUsbHost => "Waiting for USB host…",
+        Key::ReturningToDevices => "Returning to Devices…",
         Key::Settings => "Settings",
         Key::DpadMode => "D-Pad Mode",
         Key::Dpad => "D-Pad",
@@ -160,6 +178,9 @@ fn english(key: Key) -> &'static str {
         Key::ErrorTitle => "Error",
         Key::BluetoothActivationError => {
             "A problem occurred during Bluetooth activation. Please try again."
+        }
+        Key::UsbActivationError => {
+            "A problem occurred during USB activation. Please try again."
         }
         Key::UnsupportedDeviceTitle => "Unsupported device",
         Key::UnsupportedDeviceMessage => {
@@ -198,6 +219,7 @@ mod tests {
     fn templates_keep_their_placeholders() {
         let templates = [
             (Key::ProfileLine, "{profile}"),
+            (Key::ProfileLineUsb, "{profile}"),
             (Key::ControllerLine, "{type}"),
             (Key::ReconnectingTo, "{host}"),
             (Key::ForgetTitle, "{name}"),

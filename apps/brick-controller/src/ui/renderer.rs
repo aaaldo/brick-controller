@@ -31,8 +31,10 @@ impl Frame {
     /// Splash and connection popup use an indeterminate bar; the renderer
     /// keeps redrawing them so its segment moves.
     fn animates(&self) -> bool {
-        matches!(&self.view, View::Splash { .. } | View::Pairing { .. })
-            || self.modal.as_ref().is_some_and(|modal| modal.loading)
+        matches!(
+            &self.view,
+            View::Splash { .. } | View::Pairing { .. } | View::WiredWaiting { .. }
+        ) || self.modal.as_ref().is_some_and(|modal| modal.loading)
     }
 }
 
@@ -219,7 +221,11 @@ mod tests {
     fn a_static_screen_does_not_animate() {
         let frame = Frame {
             lang: Lang::En,
-            view: View::Menu { rows: Vec::new() },
+            view: View::Menu {
+                rows: Vec::new(),
+                can_forget: false,
+                open: false,
+            },
             status: status(),
             modal: None,
             hold: None,

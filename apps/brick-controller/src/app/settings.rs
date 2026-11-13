@@ -310,14 +310,15 @@ impl Settings {
         }
     }
 
-    /// Devices always ends with pairing and Settings, even while a host is
-    /// connected: connecting, pairing and preferences are explicit choices on
-    /// this screen.
+    /// Devices always ends with pairing, the wired PC mode and Settings, even
+    /// while a host is connected: connecting, pairing, switching transport and
+    /// preferences are explicit choices on this screen.
     pub fn rows(&self) -> Vec<MenuRow> {
         let mut rows: Vec<MenuRow> = (0..self.hosts.len()).map(MenuRow::Host).collect();
         rows.push(MenuRow::Pair);
-        // Settings stays last: transport choices, such as a wired row, belong
-        // above it.
+        // Settings stays last: the Settings screen returns to the last row,
+        // and transport choices such as a wired row belong above it.
+        rows.push(MenuRow::Wired);
         rows.push(MenuRow::Settings);
         rows
     }
