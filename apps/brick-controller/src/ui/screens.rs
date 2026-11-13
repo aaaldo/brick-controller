@@ -31,6 +31,9 @@ pub enum View {
         /// forgotten. Pairing and the wired mode have nothing to forget.
         can_forget: bool,
     },
+    Settings {
+        rows: Vec<Row>,
+    },
     Profile {
         rows: Vec<Row>,
     },
@@ -116,6 +119,17 @@ pub fn draw(
                     hint_text(theme),
                 );
             }
+        }
+        View::Settings { rows } => {
+            header(canvas, fonts, theme, status, tr(lang, Key::Settings));
+            rows_at(canvas, fonts, theme, rows, 120);
+            footer(
+                canvas,
+                fonts,
+                theme,
+                &[item("B", tr(lang, Key::Back))],
+                &[item("L/R", tr(lang, Key::Change))],
+            );
         }
         View::Profile { rows } => {
             header(canvas, fonts, theme, status, tr(lang, Key::ControllerType));

@@ -12,6 +12,7 @@
 //! Only the Linux build compiles this module: the transport repurposes the
 //! ADB gadget and mounts FunctionFS.
 
+use super::settings::Preferences;
 use super::view_model::{wired_controller, wired_waiting};
 use super::{DISCONNECT_HOLD, SCREEN_OFF_AFTER};
 use crate::i18n::{tr, Key, Lang};
@@ -54,6 +55,9 @@ pub(crate) fn session(screen: &Renderer, pad: &mut Pad) -> Result<(), String> {
 /// leaves or the transport fails.
 fn run(screen: &Renderer, pad: &mut Pad) -> Result<(), String> {
     let lang = Lang::En;
+    // The D-pad preference is global; applying it here keeps the host-visible
+    // state identical to the Bluetooth session.
+    let preferences = Preferences::load();
     let mut backlight = display::Backlight::open();
     screen.show(Frame {
         lang,
@@ -260,7 +264,7 @@ fn run(screen: &Renderer, pad: &mut Pad) -> Result<(), String> {
         let report_state = if state == WiredScreen::Waiting || combo_seen || resume_after_release {
             PadState::default()
         } else {
-            now
+            now.with_dpad_mode(preferences.dpad)
         };
 
         if enabled {

@@ -36,6 +36,8 @@ then play.
   PlayStation and Switch.
 - A **Devices** home screen that lists your paired hosts. Nothing connects
   until you choose it.
+- A **Settings** screen under Devices: send the D-pad as a D-pad or as the left
+  stick, and choose the rumble strength between Off, Low, Mid and Strong.
 - A screen that gets out of the way: the panel turns off after 10 seconds while
   the gamepad keeps working. Tap **Menu+Start** once to wake it.
 - A status bar with the time, Bluetooth, Wi-Fi and battery state.
@@ -47,7 +49,7 @@ then play.
 | Devices | Pairing | Connected |
 | --- | --- | --- |
 | <img src="brick-ui-mockups/actual/menu.png" alt="Devices screen" width="260"> | <img src="brick-ui-mockups/actual/pairing.png" alt="Pairing screen" width="260"> | <img src="brick-ui-mockups/actual/controller.png" alt="Connected screen" width="260"> |
-| Your paired hosts and **Pair a new device**. | The name, controller type and a waiting indicator. | The host, the active profile and the sleep hint. |
+| Your paired hosts, **Pair a new device**, **Wired connection** and **Settings**. | The name, controller type and a waiting indicator. | The host, the active profile and the sleep hint. |
 
 | Controller type | Forget a host | Changing type |
 | --- | --- | --- |
@@ -57,6 +59,13 @@ then play.
 The wired mode has its own waiting screen, using the Pairing layout with the
 identity and a waiting indicator, and a connected screen titled **Connected**
 with the host `PC (USB)` and `Profile PC · USB HID`.
+
+<p align="center">
+  <img src="brick-ui-mockups/actual/settings.png" alt="Settings screen" width="520">
+</p>
+
+The **Settings** screen opens from Devices. The D-pad selects a line,
+left/right changes its value, and **B** returns to Devices.
 
 ## Getting started
 
@@ -74,8 +83,8 @@ ADB or SSH; ADB is unavailable while a wired session runs.
 
 ### Install
 
-The `v1.0.0` release is being submitted to Pak Store. Until it appears, use the
-manual installation.
+The `v1.1.0` release is available on GitHub. If it is not in Pak Store yet, use
+the manual installation.
 
 #### Manual installation
 
@@ -133,10 +142,12 @@ every exit path, including a crash.
 ## Everyday use
 
 - **Devices** is the home screen. It does not connect to a host on its own.
-- **A** connects the selected host, opens **Pair a new device**, or starts the
-  wired PC mode.
+- **A** connects the selected host, opens **Pair a new device**, starts the
+  wired PC mode, or opens **Settings**.
+- In **Settings**, the D-pad up/down selects a line and left/right changes its
+  value. **B** returns to Devices.
 - **X** forgets the selected host after confirmation. It is only offered on a
-  host row; Pairing and the wired mode have no identity to forget.
+  host row; Pairing, the wired mode and Settings have no identity to forget.
 - **B** quits the app from the Devices screen, or leaves the wired waiting
   screen.
 - Hold **Menu+Start** for 1 second to disconnect and return to Devices, in both
@@ -186,6 +197,12 @@ for a host or the identity offered to the next Bluetooth pairing.
   shows an unsupported-device screen and exits without taking over Bluetooth.
 - Rumble works in Xbox, PlayStation and Switch modes. The PC profile has no
   output report, so PC hosts do not vibrate the handheld.
+- **D-Pad Mode** in Settings sends the D-pad as the left stick instead of the
+  hat. The app's own screens still navigate with the D-pad. On the Brick Pro the
+  physical sticks keep working; a D-pad press takes over while it is held.
+- **Rumble strength** scales the host's request: Off 0 %, Low 30 %, Mid 60 %,
+  Strong 90 %. The two Settings values are saved on the SD card and survive a
+  restart.
 - The Brick standard has no analog sticks, gyro, trackpads or back buttons.
   Sticks are reported centred for host compatibility. The Brick Pro adds two
   Hall-effect sticks and real L3/R3 clicks, with its Fn keys left unmapped.
@@ -278,8 +295,8 @@ cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo build --release --target aarch64-unknown-linux-musl -p brick-controller
-VERSION=v1.0.0 ./apps/brick-controller/deploy/package.sh
-./scripts/check-pak.sh v1.0.0
+VERSION=v1.1.0 ./apps/brick-controller/deploy/package.sh
+./scripts/check-pak.sh v1.1.0
 ```
 
 The binary is static; no Rust runtime is needed on the handheld.
