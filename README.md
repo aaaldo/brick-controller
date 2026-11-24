@@ -81,6 +81,20 @@ left/right changes its value, and **B** returns to Devices.
 Normal Bluetooth use needs no cable. A cable is also needed for development over
 ADB or SSH; ADB is unavailable while a wired session runs.
 
+### RG40XX H on NextUI
+
+The development build supports the Anbernic RG40XX H on NextUI (`h700`).
+Other H700 models are outside the current hardware coverage. Build the Pak
+from source using the [build instructions](#build-from-source), then put it in
+`Tools/h700/Brick Controller.pak/` on the SD card. Published v1.1.0 packages
+target the TrimUI Brick.
+
+The app starts Bluetooth for the session if it was off on launch. Both sticks
+and their click buttons are mapped, and the digital L2/R2 buttons send full
+trigger travel. Rumble is currently unavailable on the RG40XX H. The built-in
+panel blanks after 10 seconds with a connected host and wakes with **Menu+Start**.
+The app leaves the display alone when HDMI is connected.
+
 ### Install
 
 The `v1.1.0` release is available on GitHub. If it is not in Pak Store yet, use

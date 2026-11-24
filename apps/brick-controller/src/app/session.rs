@@ -966,8 +966,7 @@ pub(crate) fn session(
             && link.is_some()
             && screen_off_at.is_some_and(|deadline| Instant::now() >= deadline)
         {
-            backlight.off();
-            screen_off = true;
+            screen_off = backlight.off();
             screen_off_at = None;
             drawn = None;
         }

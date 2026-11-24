@@ -16,6 +16,7 @@
 //! state it fills lives in `input.rs`; profiles translate that state into
 //! their own reports.
 
+use super::model::Model;
 use crate::input::{scale, Button, Hat, PadState};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read};
@@ -86,7 +87,54 @@ fn eviocgabs(abs: u16) -> libc::c_ulong {
         | (0x40 + abs as libc::c_ulong)
 }
 
-pub use brick::input::pad_path;
+pub fn pad_path() -> String {
+    if Model::current() != Model::Rg40xxH {
+        return brick::input::pad_path();
+    }
+    let devices = std::fs::read_to_string("/proc/bus/input/devices").unwrap_or_default();
+    devices
+        .split("\n\n")
+        .find(|block| {
+            block
+                .lines()
+                .any(|line| line == "N: Name=\"ANBERNIC-keys\"")
+        })
+        .and_then(|block| {
+            block
+                .lines()
+                .find_map(|line| line.strip_prefix("H: Handlers="))
+        })
+        .and_then(|handlers| {
+            handlers
+                .split_whitespace()
+                .find(|name| name.starts_with("event"))
+        })
+        .map(|name| format!("/dev/input/{name}"))
+        .unwrap_or_else(|| "/dev/input/event1".into())
+}
+
+// Translate the H700 evdev layout into the normalized layout used by Mapper.
+// Its digital L2/R2 buttons represent the full travel of the trigger axes.
+fn normalize_h700(kind: u16, code: u16, value: i32) -> (u16, u16, i32) {
+    match (kind, code) {
+        (EV_KEY, 304) => (EV_KEY, 305, value),
+        (EV_KEY, 305) => (EV_KEY, 304, value),
+        (EV_KEY, 306) => (EV_KEY, KEY_Y, value),
+        (EV_KEY, 307) => (EV_KEY, KEY_X, value),
+        (EV_KEY, 308) => (EV_KEY, 310, value),
+        (EV_KEY, 309) => (EV_KEY, 311, value),
+        (EV_KEY, 310) => (EV_KEY, 314, value),
+        (EV_KEY, 311) => (EV_KEY, 315, value),
+        (EV_KEY, 312) => (EV_KEY, 316, value),
+        (EV_KEY, 313) => (EV_KEY, 317, value),
+        (EV_KEY, 314) => (EV_ABS, ABS_Z, if value == 0 { 0 } else { 255 }),
+        (EV_KEY, 315) => (EV_ABS, ABS_RZ, if value == 0 { 0 } else { 255 }),
+        (EV_KEY, 316) => (EV_KEY, 318, value),
+        (EV_ABS, ABS_Z) => (EV_ABS, ABS_X, value),
+        (EV_ABS, ABS_RZ) => (EV_ABS, ABS_Y, value),
+        _ => (kind, code, value),
+    }
+}
 
 /// Turns evdev events into gamepad state. Separate from the file so the
 /// mapping can be tested without a device.
@@ -204,6 +252,7 @@ impl Mapper {
 pub struct Pad {
     file: File,
     pub mapper: Mapper,
+    h700: bool,
     /// Each (type, code) is logged the first time it arrives, so the log says
     /// what the hardware actually sends without a line per event.
     seen: std::collections::HashSet<(u16, u16)>,
@@ -217,10 +266,22 @@ impl Pad {
             .read(true)
             .custom_flags(libc::O_NONBLOCK)
             .open(path)?;
+        let h700 = Model::current() == Model::Rg40xxH;
         let mut ranges = Mapper::default().ranges;
         for (i, slot) in ranges.iter_mut().enumerate() {
+            let axis = if h700 {
+                match i {
+                    0 => ABS_Z,
+                    1 => ABS_RZ,
+                    3 => ABS_RX,
+                    4 => ABS_RY,
+                    _ => continue,
+                }
+            } else {
+                i as u16
+            };
             let mut info = AbsInfo::default();
-            if unsafe { libc::ioctl(file.as_raw_fd(), eviocgabs(i as u16) as _, &mut info) } == 0
+            if unsafe { libc::ioctl(file.as_raw_fd(), eviocgabs(axis) as _, &mut info) } == 0
                 && info.maximum > info.minimum
             {
                 *slot = (info.minimum, info.maximum);
@@ -230,6 +291,7 @@ impl Pad {
         let mut pad = Self {
             file,
             mapper: Mapper::with_ranges(ranges),
+            h700,
             seen: Default::default(),
         };
         // Nothing else reads the gamepad node while the app is away, so events
@@ -284,7 +346,12 @@ impl Pad {
                     ev.kind, ev.code, ev.value
                 );
             }
-            frame |= self.mapper.apply(ev.kind, ev.code, ev.value);
+            let (kind, code, value) = if self.h700 {
+                normalize_h700(ev.kind, ev.code, ev.value)
+            } else {
+                (ev.kind, ev.code, ev.value)
+            };
+            frame |= self.mapper.apply(kind, code, value);
         }
         Ok(frame)
     }
@@ -330,6 +397,27 @@ mod tests {
         );
         assert!(m.take_combo_tap());
         assert!(!m.take_combo_tap(), "the tap is consumed once");
+    }
+
+    #[test]
+    fn h700_sticks_triggers_and_menu_are_distinct() {
+        let mut mapper = Mapper::default();
+        for (kind, code, value) in [
+            (EV_ABS, ABS_Z, 32767),
+            (EV_ABS, ABS_RZ, -32768),
+            (EV_ABS, ABS_RX, -32768),
+            (EV_ABS, ABS_RY, 32767),
+            (EV_KEY, 312, 1),
+            (EV_KEY, 311, 1),
+            (EV_KEY, 314, 1),
+            (EV_KEY, 315, 1),
+        ] {
+            let (kind, code, value) = normalize_h700(kind, code, value);
+            mapper.apply(kind, code, value);
+        }
+        assert_eq!(mapper.state.sticks, [255, 0, 0, 255]);
+        assert_eq!(mapper.state.triggers, [255, 255]);
+        assert!(mapper.take_combo_tap());
     }
 
     #[test]

@@ -48,6 +48,9 @@ fn main() {
     // ADB and the system gadget available again.
     #[cfg(target_os = "linux")]
     usb::restore_after_crash();
+    if let Err(e) = display::restore() {
+        eprintln!("display: could not restore the previous session: {e}");
+    }
     if let Err(e) = app::run() {
         eprintln!("brick-controller: {e}");
         std::process::exit(1);

@@ -20,6 +20,7 @@ struct Glyph {
 pub struct Fonts {
     /// Tried in order; a character is drawn with the first face that has it.
     faces: Vec<fontdue::Font>,
+    scale: f32,
     cache: HashMap<(char, u32), Glyph>,
 }
 
@@ -51,8 +52,13 @@ impl Fonts {
         faces.push(parse(EMBEDDED).expect("the embedded font parses"));
         Self {
             faces,
+            scale: 1.0,
             cache: HashMap::new(),
         }
+    }
+
+    pub fn set_scale(&mut self, scale: f32) {
+        self.scale = scale;
     }
 
     /// Rasterise a glyph once per (character, size) and cache the coverage.
@@ -62,6 +68,7 @@ impl Fonts {
     /// between values that would round to the same pixel size but rasterise
     /// differently.
     fn glyph(&mut self, ch: char, size: f32) -> &Glyph {
+        let size = size * self.scale;
         let faces = &self.faces;
         self.cache.entry((ch, size.to_bits())).or_insert_with(|| {
             let face = faces

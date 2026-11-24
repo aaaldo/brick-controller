@@ -148,7 +148,8 @@ impl Daemon {
         let _ = Command::new("hciconfig")
             .args(["hci0", "lp", "RSWITCH"])
             .status();
-        let child = Command::new(DAEMON)
+        let daemon = std::env::var_os("NEXTUI_BLUETOOTHD").unwrap_or_else(|| DAEMON.into());
+        let child = Command::new(daemon)
             .args(["-n", "-P", "input,hog", "-f", CONFIG])
             .stdin(Stdio::null())
             .stdout(Stdio::null())

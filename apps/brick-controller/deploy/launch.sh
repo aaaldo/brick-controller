@@ -11,6 +11,14 @@ DIR=$(dirname "$0")
 DIR=$(cd "$DIR" && pwd)
 LOG="${LOGS_PATH:-/tmp}/BrickController.txt"
 
+case "${PLATFORM:-}:${DEVICE:-}" in
+    h700:rg40xxh|h700:rg40xx-h|'h700:rg40xx h') ;;
+    h700:*)
+        echo "Brick Controller supports the RG40XX H on H700 (${DEVICE:-unknown} detected)." >>"$LOG"
+        exit 1
+        ;;
+esac
+
 export HOME="$DIR"
 export BRICK_CONTROLLER_DATA="${USERDATA_PATH:-/tmp}/brick-controller"
 mkdir -p "$BRICK_CONTROLLER_DATA"
@@ -68,6 +76,10 @@ NEXTUI_BT_INIT="${SYSTEM_PATH:-}/etc/bluetooth/bt_init.sh"
 [ -f "$NEXTUI_BT_INIT" ] || NEXTUI_BT_INIT=""
 export NEXTUI_BT_INIT
 
+if [ "${PLATFORM:-}" = h700 ]; then
+    export NEXTUI_BLUETOOTHD=/usr/libexec/bluetooth/bluetoothd
+fi
+
 # NextUI puts the CPU on `performance` before every Pak. This app only draws a
 # small status screen and reads input, so the lower capped clock is enough.
 # NextUI restores its own governor when the Pak exits.
@@ -84,6 +96,7 @@ SYNC_SETTINGS="${SYSTEM_PATH:-}/bin/syncsettings.elf"
 # Remember whether Bluetooth was already up: a user who launched the Pak with
 # Bluetooth off must not get it switched on behind their back at exit.
 BT_WAS_ON=0
+BT_STARTED=0
 pidof bluetoothd >/dev/null 2>&1 && BT_WAS_ON=1
 
 cleanup() {
@@ -97,15 +110,29 @@ cleanup() {
         LD_LIBRARY_PATH="${SYSTEM_PATH:-}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
             "$SYNC_SETTINGS" >>"$LOG" 2>&1
     fi
-    if [ "$BT_WAS_ON" = 1 ] && [ -n "$NEXTUI_BT_INIT" ]; then
-        sh "$NEXTUI_BT_INIT" start >>"$LOG" 2>&1
+    if [ "$BT_STARTED" = 1 ]; then
+        sh "$NEXTUI_BT_INIT" stop >>"$LOG" 2>&1
+    elif [ "$BT_WAS_ON" = 1 ] && [ -n "$NEXTUI_BT_INIT" ]; then
+        if [ "${PLATFORM:-}" != h700 ] || ! pidof bluetoothd >/dev/null 2>&1; then
+            sh "$NEXTUI_BT_INIT" start >>"$LOG" 2>&1
+        fi
     fi
     sync
     if [ "$(cat "$PIDFILE" 2>/dev/null)" = "$$" ]; then
         rm -f "$PIDFILE"
     fi
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+if [ "${PLATFORM:-}" = h700 ] && [ "$BT_WAS_ON" = 0 ] && [ -n "$NEXTUI_BT_INIT" ]; then
+    BT_STARTED=1
+    if ! sh "$NEXTUI_BT_INIT" start >>"$LOG" 2>&1; then
+        echo "launch: could not initialize H700 Bluetooth" >>"$LOG"
+        exit 1
+    fi
+fi
 
 cd "$DIR"
 "$DIR/brick-controller" >>"$LOG" 2>&1

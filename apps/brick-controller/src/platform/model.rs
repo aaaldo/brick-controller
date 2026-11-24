@@ -1,7 +1,7 @@
 // Copyright 2026 the Brick Controller contributors
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Which TrimUI model the binary is running on.
+//! Which handheld model the binary is running on.
 //!
 //! NextUI exports `DEVICE` for every Pak (`brick`, `brickpro`, `smartpro`,
 //! `smartpros`). The application only needs the distinction where the hardware
@@ -16,6 +16,7 @@ pub enum Model {
     BrickPro,
     SmartPro,
     SmartProS,
+    Rg40xxH,
     /// No reliable identification; use the behaviour common to the Brick.
     Unknown,
 }
@@ -33,6 +34,7 @@ impl Model {
             "brickpro" | "brick pro" | "trimui brickpro" | "trimui brick pro" => Self::BrickPro,
             "smartpro" | "smart pro" | "trimui smart pro" => Self::SmartPro,
             "smartpros" | "smart pro s" | "trimui smart pro s" => Self::SmartProS,
+            "rg40xxh" | "rg40xx-h" | "rg40xx h" => Self::Rg40xxH,
             _ => Self::Unknown,
         }
     }
@@ -88,6 +90,8 @@ mod tests {
         assert_eq!(Model::parse("brickpro"), Model::BrickPro);
         assert_eq!(Model::parse("smartpro"), Model::SmartPro);
         assert_eq!(Model::parse("smartpros"), Model::SmartProS);
+        assert_eq!(Model::parse("rg40xxh"), Model::Rg40xxH);
+        assert_eq!(Model::parse("rg40xx-h"), Model::Rg40xxH);
         assert_eq!(Model::parse(" unknown "), Model::Unknown);
     }
 

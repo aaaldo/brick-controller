@@ -79,7 +79,10 @@ pub(crate) fn run() -> Result<(), String> {
     eprintln!("brick-controller {VERSION}");
     let canvas = Canvas::open("/dev/fb0").map_err(|e| format!("framebuffer: {e}"))?;
     let theme = Theme::load();
-    let fonts = Fonts::load(&crate::ui::font_paths());
+    let mut fonts = Fonts::load(&crate::ui::font_paths());
+    if Model::current() == Model::Rg40xxH {
+        fonts.set_scale(canvas.width() as f32 / 1024.0);
+    }
     let mut pad = Pad::open(&pad_path()).map_err(|e| format!("pad: {e}"))?;
     let screen = Renderer::spawn(canvas, fonts, theme);
     // Refuse a model with no layout before touching Bluetooth: the Smart Pro

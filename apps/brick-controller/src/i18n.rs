@@ -47,6 +47,8 @@ macro_rules! keys {
 
 keys! {
     AppName,
+    H700AdaptationCredit,
+    PadpodSource,
     Connected,
     Devices,
     ControllerType,
@@ -125,6 +127,8 @@ pub fn fill(template: &str, args: &[(&str, &str)]) -> String {
 fn english(key: Key) -> &'static str {
     match key {
         Key::AppName => "Brick Controller",
+        Key::H700AdaptationCredit => "H700 adaptation by Codex · Padpod by ligt",
+        Key::PadpodSource => "github.com/duyquang6/padpod",
         Key::Connected => "Connected",
         Key::Devices => "Devices",
         Key::ControllerType => "Controller type",

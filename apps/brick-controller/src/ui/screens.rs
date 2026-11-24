@@ -283,6 +283,25 @@ fn draw_splash(
         bar_h,
         Loading::Indeterminate(phase),
     );
+    if crate::platform::model::Model::current() == crate::platform::model::Model::Rg40xxH {
+        let y = canvas.height() - s(canvas, 56);
+        fonts.draw_centred(
+            canvas,
+            tr(lang, Key::H700AdaptationCredit),
+            centre,
+            y,
+            SMALL_SIZE,
+            theme.hint,
+        );
+        fonts.draw_centred(
+            canvas,
+            tr(lang, Key::PadpodSource),
+            centre,
+            y + s(canvas, 35),
+            SMALL_SIZE,
+            theme.hint,
+        );
+    }
 }
 
 /// The connected view: who is linked, which identity it sees, and how to
