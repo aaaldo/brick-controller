@@ -4,10 +4,11 @@
 //! Which handheld model the binary is running on.
 //!
 //! NextUI exports `DEVICE` for every Pak (`brick`, `brickpro`, `smartpro`,
-//! `smartpros`). The application only needs the distinction where the hardware
-//! behaviour actually differs: the Brick Pro caps its rumble driver at 2.5 V
-//! while the Brick runs at 3.3 V. Everything else is shared by the `tg5040`
-//! family, so an unknown model keeps the Brick behaviour rather than guessing.
+//! `smartpros`, `rg40xxh`). The application only needs the distinction where
+//! the hardware behaviour actually differs: the Brick Pro caps its rumble
+//! driver at 2.5 V while the Brick runs at 3.3 V. The H700 family is not
+//! uniform either: only the RG40XX H is mapped, so an unknown H700 is refused
+//! rather than silently falling back to the Brick path.
 
 /// The handheld model reported by NextUI.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,6 +18,8 @@ pub enum Model {
     SmartPro,
     SmartProS,
     Rg40xxH,
+    /// An H700 model this build does not drive.
+    H700Unknown,
     /// No reliable identification; use the behaviour common to the Brick.
     Unknown,
 }
@@ -46,9 +49,19 @@ impl Model {
                 return model;
             }
         }
-        std::env::var("TRIMUI_MODEL")
-            .map(|value| Self::parse(&value))
-            .unwrap_or(Self::Unknown)
+        if let Ok(value) = std::env::var("TRIMUI_MODEL") {
+            let model = Self::parse(&value);
+            if model != Self::Unknown {
+                return model;
+            }
+        }
+        // A missing or unknown H700 identifier must not fall back to the
+        // Brick path: the H700 needs a different input mapping and framebuffer
+        // handling, and the wrong GPIO writes are not safe to guess.
+        if std::env::var("PLATFORM").is_ok_and(|value| value.trim().eq_ignore_ascii_case("h700")) {
+            return Self::H700Unknown;
+        }
+        Self::Unknown
     }
 
     /// Whether this build has a layout and hardware path for the model.
@@ -56,9 +69,10 @@ impl Model {
     /// The Smart Pro shares `tg5040` with the Brick but uses a 1280×720 panel;
     /// until its layout exists, starting would draw a cropped 1024×768
     /// interface and take Bluetooth away from NextUI for nothing. `Unknown`
-    /// stays allowed so a manual launch outside NextUI keeps the Brick path.
+    /// stays allowed so a manual launch outside NextUI keeps the Brick path,
+    /// but an H700 that is not the known RG40XX H is refused.
     pub fn is_supported(self) -> bool {
-        !matches!(self, Self::SmartPro | Self::SmartProS)
+        !matches!(self, Self::SmartPro | Self::SmartProS | Self::H700Unknown)
     }
 
     /// The motor voltage to use while this application owns the rumble path.
@@ -103,12 +117,14 @@ mod tests {
     }
 
     #[test]
-    fn the_smart_pro_is_refused_until_its_layout_exists() {
+    fn unsupported_models_are_refused() {
         assert!(Model::Brick.is_supported());
         assert!(Model::BrickPro.is_supported());
+        assert!(Model::Rg40xxH.is_supported());
         assert!(Model::Unknown.is_supported());
         assert!(!Model::SmartPro.is_supported());
         assert!(!Model::SmartProS.is_supported());
+        assert!(!Model::H700Unknown.is_supported());
     }
 
     #[test]

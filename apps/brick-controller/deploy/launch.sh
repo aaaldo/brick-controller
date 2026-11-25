@@ -14,10 +14,18 @@ LOG="${LOGS_PATH:-/tmp}/BrickController.txt"
 case "${PLATFORM:-}:${DEVICE:-}" in
     h700:rg40xxh|h700:rg40xx-h|'h700:rg40xx h') ;;
     h700:*)
-        echo "Brick Controller supports the RG40XX H on H700 (${DEVICE:-unknown} detected)." >>"$LOG"
+        echo "Brick Controller supports only the RG40XX H on H700 (${DEVICE:-unknown} detected)." >>"$LOG"
         exit 1
         ;;
 esac
+if [ "${PLATFORM:-}" != h700 ]; then
+    case "${DEVICE:-}" in
+        rg40xxh|rg40xx-h|'rg40xx h')
+            echo "Brick Controller: ${DEVICE} requires PLATFORM=h700 (got ${PLATFORM:-unknown})." >>"$LOG"
+            exit 1
+            ;;
+    esac
+fi
 
 export HOME="$DIR"
 export BRICK_CONTROLLER_DATA="${USERDATA_PATH:-/tmp}/brick-controller"
@@ -76,6 +84,8 @@ NEXTUI_BT_INIT="${SYSTEM_PATH:-}/etc/bluetooth/bt_init.sh"
 [ -f "$NEXTUI_BT_INIT" ] || NEXTUI_BT_INIT=""
 export NEXTUI_BT_INIT
 
+# H700 keeps its daemon outside /usr/bin. The binary validates this path
+# before executing it, so a bad environment cannot launch an arbitrary binary.
 if [ "${PLATFORM:-}" = h700 ]; then
     export NEXTUI_BLUETOOTHD=/usr/libexec/bluetooth/bluetoothd
 fi
@@ -99,6 +109,13 @@ BT_WAS_ON=0
 BT_STARTED=0
 pidof bluetoothd >/dev/null 2>&1 && BT_WAS_ON=1
 
+# Stop only the daemons, never `bt_init.sh stop`: the full stop can tear down
+# `hciattach` and make the adapter unavailable until a reboot.
+stop_bluetooth_daemons() {
+    killall bluealsa 2>/dev/null
+    killall bluetoothd 2>/dev/null
+}
+
 cleanup() {
     # Order matters. The binary restores the backlight, its own Bluetooth
     # daemon and the g1 USB gadget first; syncsettings then puts NextUI's shared
@@ -111,11 +128,12 @@ cleanup() {
             "$SYNC_SETTINGS" >>"$LOG" 2>&1
     fi
     if [ "$BT_STARTED" = 1 ]; then
-        sh "$NEXTUI_BT_INIT" stop >>"$LOG" 2>&1
+        stop_bluetooth_daemons
     elif [ "$BT_WAS_ON" = 1 ] && [ -n "$NEXTUI_BT_INIT" ]; then
-        if [ "${PLATFORM:-}" != h700 ] || ! pidof bluetoothd >/dev/null 2>&1; then
-            sh "$NEXTUI_BT_INIT" start >>"$LOG" 2>&1
-        fi
+        # Always run the NextUI script here: it restarts both bluetoothd and
+        # bluealsa. Checking only bluetoothd left bluealsa stopped after a
+        # session on the Brick (observed in hardware testing).
+        sh "$NEXTUI_BT_INIT" start >>"$LOG" 2>&1
     fi
     sync
     if [ "$(cat "$PIDFILE" 2>/dev/null)" = "$$" ]; then
@@ -128,6 +146,9 @@ trap 'exit 143' TERM
 
 if [ "${PLATFORM:-}" = h700 ] && [ "$BT_WAS_ON" = 0 ] && [ -n "$NEXTUI_BT_INIT" ]; then
     BT_STARTED=1
+    # Tell the binary that this daemon belongs to the wrapper: at exit it must
+    # stop it, not restore NextUI's stack.
+    export BRICK_CONTROLLER_BT_STARTED=1
     if ! sh "$NEXTUI_BT_INIT" start >>"$LOG" 2>&1; then
         echo "launch: could not initialize H700 Bluetooth" >>"$LOG"
         exit 1

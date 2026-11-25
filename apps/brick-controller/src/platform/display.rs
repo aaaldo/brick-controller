@@ -54,20 +54,31 @@ fn set_raw(file: &File, value: u16) -> io::Result<()> {
     Ok(())
 }
 
+/// Parse the two shapes sysfs uses for the HDMI cable state.
+fn parse_hdmi_state(state: &str) -> bool {
+    state.trim() == "1" || state.lines().any(|line| line.trim() == "HDMI=1")
+}
+
 fn hdmi_connected() -> bool {
-    fs::read_to_string("/sys/class/extcon/hdmi/state")
-        .is_ok_and(|state| state.trim() == "1" || state.lines().any(|line| line == "HDMI=1"))
+    fs::read_to_string("/sys/class/extcon/hdmi/state").is_ok_and(|state| parse_hdmi_state(&state))
         || fs::read_to_string("/sys/class/extcon/hdmi/cable.0/state")
-            .is_ok_and(|state| state.trim() == "1")
+            .is_ok_and(|state| parse_hdmi_state(&state))
 }
 
 fn show_panel(file: &File, brightness: u16, h700: bool) -> io::Result<()> {
-    let unblank = if h700 {
+    // Unblank whenever the node exists, not only when `DEVICE` says H700: a
+    // crash restore can run without `DEVICE` and must not leave fb0 dark.
+    let unblank = if h700 || std::path::Path::new(FB_BLANK).exists() {
         fs::write(FB_BLANK, "0\n")
     } else {
         Ok(())
     };
     let restored = set_raw(file, brightness);
+    if let (Err(unblank_error), Err(brightness_error)) = (&unblank, &restored) {
+        eprintln!(
+            "display: unblank failed: {unblank_error}; brightness failed: {brightness_error}"
+        );
+    }
     unblank.and(restored)
 }
 
@@ -95,9 +106,10 @@ fn save_restore(value: u16) -> io::Result<()> {
 
 /// Switch the panel off and back on, remembering the brightness it had.
 ///
-/// `saved` is the raw value to write back. It is captured at open time rather
-/// than read at each wake because the panel may already be dark when the app
-/// starts; in that case the on-disk marker from the previous run wins.
+/// `saved` starts as the value captured at open time and is refreshed from the
+/// panel just before each switch-off, so a brightness changed by NextUI during
+/// the session is preserved. A dark panel at start uses the on-disk marker from
+/// the previous run instead.
 pub struct Backlight {
     file: Option<File>,
     h700: bool,
@@ -131,7 +143,13 @@ impl Backlight {
         }
     }
 
-    /// Darken the panel, leaving the framebuffer and the Bluetooth link up.
+    /// Darken the panel. Bluetooth keeps running; on H700 the framebuffer is
+    /// blanked as well.
+    ///
+    /// Returns false when the panel could not be switched off: no display
+    /// node, HDMI connected on H700, or the crash-recovery marker could not be
+    /// written. The caller keeps the ten-second cycle armed so a transient
+    /// failure is retried.
     pub fn off(&mut self) -> bool {
         if self.off {
             return true;
@@ -169,19 +187,23 @@ impl Backlight {
     }
 
     /// Bring the panel back at the brightness it had before.
-    pub fn on(&mut self) {
+    ///
+    /// Returns false when the panel could not be restored; the caller keeps
+    /// its screen-off state and retries on the next wake.
+    pub fn on(&mut self) -> bool {
         if !self.off {
-            return;
+            return true;
         }
         if let Some(file) = &self.file {
             if let Err(e) = show_panel(file, self.saved, self.h700) {
                 eprintln!("display: could not turn the panel on: {e}");
-                return;
+                return false;
             }
         }
         let _ = fs::remove_file(restore_path());
         self.off = false;
         eprintln!("display: panel on");
+        true
     }
 }
 
@@ -189,7 +211,7 @@ impl Drop for Backlight {
     fn drop(&mut self) {
         // A panic or early return must not leave the panel dark; `on` is a
         // no-op when it was never switched off.
-        self.on();
+        let _ = self.on();
     }
 }
 
@@ -209,6 +231,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn hdmi_state_accepts_both_sysfs_shapes() {
+        assert!(parse_hdmi_state("1\n"));
+        assert!(parse_hdmi_state("HDMI=1\n"));
+        assert!(parse_hdmi_state(" HDMI=1 \n"));
+        assert!(!parse_hdmi_state("0\n"));
+        assert!(!parse_hdmi_state("HDMI=0\n"));
+        assert!(!parse_hdmi_state(""));
+    }
+
+    #[test]
     #[ignore = "requires an RG40XX H panel, with HDMI unplugged"]
     fn rg40xxh_blanks_and_restores() {
         assert_eq!(Model::current(), Model::Rg40xxH);
@@ -220,7 +252,7 @@ mod tests {
         assert!(panel.off());
         assert_eq!(get_raw(panel.file.as_ref().unwrap()), Some(0));
         assert_eq!(read_restore(), Some(original));
-        panel.on();
+        assert!(panel.on());
         assert_eq!(get_raw(panel.file.as_ref().unwrap()), Some(original));
         assert!(read_restore().is_none());
 

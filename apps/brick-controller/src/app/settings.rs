@@ -13,6 +13,7 @@ use super::view_model::{MenuRow, SettingRow};
 use crate::bluetooth::{bluez, Address};
 use crate::input::DpadMode;
 use crate::paths::data_dir;
+use crate::platform::model::Model;
 use crate::profiles::Profile;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -280,12 +281,17 @@ pub struct Settings {
     /// The identity a new host would pair with, when no host is known yet.
     pub(crate) pairing: Profile,
     pub(crate) preferences: Preferences,
+    /// Whether this build exposes the wired USB mode. The H700 backend is not
+    /// implemented, so the row is hidden instead of leading to a failed
+    /// `g1`/ADB takeover.
+    pub(crate) wired: bool,
     pub(crate) error: Option<String>,
 }
 
 impl Settings {
     pub fn load(bus: &bluez::Bus, pairing: Profile) -> Self {
         let preferences = Preferences::load();
+        let wired = Model::current() != Model::Rg40xxH;
         match bus.paired_hosts() {
             Ok(hosts) => {
                 eprintln!("menu: {} paired host(s)", hosts.len());
@@ -294,6 +300,7 @@ impl Settings {
                     profiles: load_profiles(),
                     pairing,
                     preferences,
+                    wired,
                     error: None,
                 }
             }
@@ -304,21 +311,25 @@ impl Settings {
                     profiles: load_profiles(),
                     pairing,
                     preferences,
+                    wired,
                     error: Some(error),
                 }
             }
         }
     }
 
-    /// Devices always ends with pairing, the wired PC mode and Settings, even
-    /// while a host is connected: connecting, pairing, switching transport and
-    /// preferences are explicit choices on this screen.
+    /// Devices always ends with pairing, the wired PC mode when this model has
+    /// a backend for it, and Settings, even while a host is connected:
+    /// connecting, pairing, switching transport and preferences are explicit
+    /// choices on this screen.
     pub fn rows(&self) -> Vec<MenuRow> {
         let mut rows: Vec<MenuRow> = (0..self.hosts.len()).map(MenuRow::Host).collect();
         rows.push(MenuRow::Pair);
         // Settings stays last: the Settings screen returns to the last row,
         // and transport choices such as a wired row belong above it.
-        rows.push(MenuRow::Wired);
+        if self.wired {
+            rows.push(MenuRow::Wired);
+        }
         rows.push(MenuRow::Settings);
         rows
     }

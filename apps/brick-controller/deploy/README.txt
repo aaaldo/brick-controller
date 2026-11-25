@@ -17,6 +17,14 @@ Requirements
 - The Smart Pro and Smart Pro S are not supported yet. The app refuses to
   start on them.
 
+H700/RG40XX H (experimental)
+----------------------------
+The RG40XX H port is community-contributed and has not been validated by the
+project maintainers. Install the Pak in Tools/h700/Brick Controller.pak/.
+The wired PC mode is not available on H700; the row is hidden. Rumble is not
+available. Logs are written to
+/mnt/SDCARD/.userdata/h700/logs/BrickController.txt.
+
 Installation
 ------------
 Pak Store:

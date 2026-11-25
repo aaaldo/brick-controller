@@ -34,14 +34,21 @@ const KEY_SIZE: f32 = 27.0;
 const TITLE_SIZE: f32 = 72.0;
 const ROW_H: i32 = 90;
 
-/// Scale a layout value from the 1024-wide reference to the actual panel.
+/// Scale from the 1024-wide reference layout to the actual panel.
 ///
 /// Every metric in the UI is written against 1024×768, which is the Brick's
-/// native resolution; the helper keeps the same layout usable if a future
-/// model has a different width. Heights are derived from the same factor so
-/// pills stay circular rather than elliptical.
+/// native resolution. The same factor scales text sizes in `app::run`, so the
+/// layout and the glyphs shrink or grow together.
+pub fn layout_scale(canvas: &Canvas) -> f32 {
+    canvas.width() as f32 / 1024.0
+}
+
+/// Scale a layout value from the 1024-wide reference to the actual panel.
+///
+/// Heights are derived from the same factor so pills stay circular rather than
+/// elliptical.
 fn s(canvas: &Canvas, value: i32) -> i32 {
-    (value as f32 * canvas.width() as f32 / 1024.0).round() as i32
+    (value as f32 * layout_scale(canvas)).round() as i32
 }
 
 fn round_rect_mask(w: i32, h: i32, r: i32) -> Vec<u8> {

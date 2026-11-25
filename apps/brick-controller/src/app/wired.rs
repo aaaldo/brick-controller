@@ -147,8 +147,7 @@ fn run(screen: &Renderer, pad: &mut Pad) -> Result<(), String> {
                     state = WiredScreen::Connected;
                     screen_off_at = Some(Instant::now() + SCREEN_OFF_AFTER);
                     if screen_off {
-                        backlight.on();
-                        screen_off = false;
+                        screen_off = !backlight.on();
                     }
                     // The host configured the interface: a neutral report comes
                     // before any real state, even if a button is still held.
@@ -169,8 +168,7 @@ fn run(screen: &Renderer, pad: &mut Pad) -> Result<(), String> {
                     wake_used = false;
                     last_sent = None;
                     if screen_off {
-                        backlight.on();
-                        screen_off = false;
+                        screen_off = !backlight.on();
                     }
                     drawn = None;
                 }
@@ -210,10 +208,11 @@ fn run(screen: &Renderer, pad: &mut Pad) -> Result<(), String> {
             if combos || combo_tapped {
                 combo_seen = true;
                 if !combo_was {
-                    backlight.on();
-                    screen_off = false;
-                    wake_used = true;
-                    screen_off_at = Some(Instant::now() + SCREEN_OFF_AFTER);
+                    if backlight.on() {
+                        screen_off = false;
+                        wake_used = true;
+                        screen_off_at = Some(Instant::now() + SCREEN_OFF_AFTER);
+                    }
                     drawn = None;
                 }
             } else {
@@ -247,7 +246,13 @@ fn run(screen: &Renderer, pad: &mut Pad) -> Result<(), String> {
             && screen_off_at.is_some_and(|deadline| Instant::now() >= deadline)
         {
             screen_off = backlight.off();
-            screen_off_at = None;
+            // HDMI or a failed write leaves the panel on; keep the cycle armed
+            // so a later attempt can still save the battery.
+            screen_off_at = if screen_off {
+                None
+            } else {
+                Some(Instant::now() + SCREEN_OFF_AFTER)
+            };
             drawn = None;
         }
 

@@ -625,8 +625,7 @@ pub(crate) fn session(
             // The menu now shows the new state; a dark panel must come back
             // so the user can see why the link went away.
             if screen_off {
-                backlight.on();
-                screen_off = false;
+                screen_off = !backlight.on();
                 wake_used = false;
             }
             state = Screen::Menu { cursor: 0 };
@@ -679,10 +678,11 @@ pub(crate) fn session(
             if combos || combo_tapped {
                 combo_seen = true;
                 if !combo_was {
-                    backlight.on();
-                    screen_off = false;
-                    wake_used = true;
-                    screen_off_at = Some(Instant::now() + SCREEN_OFF_AFTER);
+                    if backlight.on() {
+                        screen_off = false;
+                        wake_used = true;
+                        screen_off_at = Some(Instant::now() + SCREEN_OFF_AFTER);
+                    }
                     drawn = None;
                 }
             } else {
@@ -967,7 +967,13 @@ pub(crate) fn session(
             && screen_off_at.is_some_and(|deadline| Instant::now() >= deadline)
         {
             screen_off = backlight.off();
-            screen_off_at = None;
+            // HDMI or a failed write leaves the panel on; keep the cycle armed
+            // so a later attempt can still save the battery.
+            screen_off_at = if screen_off {
+                None
+            } else {
+                Some(Instant::now() + SCREEN_OFF_AFTER)
+            };
             drawn = None;
         }
 
@@ -1045,8 +1051,7 @@ pub(crate) fn session(
                 motor.as_ref(),
             );
             if screen_off {
-                backlight.on();
-                screen_off = false;
+                screen_off = !backlight.on();
                 wake_used = false;
             }
             state = Screen::Menu { cursor: 0 };

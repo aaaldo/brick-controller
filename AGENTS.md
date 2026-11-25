@@ -452,10 +452,14 @@ Ne **jamais** installer dans `.system/` : ce dossier est remplacé à chaque mis
 `hciattach` et l'adaptateur, et empêche la reprise rapide. Arrêter uniquement
 `bluetoothd` et `bluealsa`.
 
-### H700 (plus tard)
+### H700 (expérimental)
 
 - Backend séparé : systemd + `setBluetooth.sh` + `bt_init.sh`.
 - Ne pas réutiliser tel quel le backend `tg5040`.
+- Seul le RG40XX H est supporté pour l'instant : `launch.sh` refuse les autres
+  H700 et le mode filaire est masqué.
+- Le mapping d'entrée H700 vit dans `platform/input_h700.rs` ; le lecteur evdev
+  partagé reste dans `platform/input_trimui.rs`.
 - Certains modèles H700 n'ont pas de Bluetooth : détecter et afficher un
   message clair.
 
@@ -892,6 +896,7 @@ Le merge et le push restent soumis à approbation humaine.
   Bluetooth : l'UDC sunxi n'accepte pas l'endpoint interrupt OUT nécessaire.
 - **Phase 2** : Smart Pro (`tg5040`, 1280×720).
 - **Phase 3** : Smart Pro S `tg5050`.
-- **Phase 4** : H700, si nécessaire.
+- **Phase 4** : H700 expérimental, RG40XX H uniquement ; le mode filaire reste
+  hors périmètre.
 - **Recherche séparée** : endpoint OUT de l'UDC sunxi (`f_hid` ou correctif
   noyau), si un mode filaire PlayStation devient une exigence.

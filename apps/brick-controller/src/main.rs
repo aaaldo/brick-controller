@@ -48,6 +48,9 @@ fn main() {
     // ADB and the system gadget available again.
     #[cfg(target_os = "linux")]
     usb::restore_after_crash();
+    // `launch.sh` already runs `restore` on exit, but a wrapper killed before
+    // its EXIT trap would leave the panel dark. This call is idempotent and
+    // cheap, and also covers a crash that happened outside the wrapper.
     if let Err(e) = display::restore() {
         eprintln!("display: could not restore the previous session: {e}");
     }

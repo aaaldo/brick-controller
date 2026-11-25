@@ -28,6 +28,7 @@ fn settings_with_one_host() -> Settings {
         profiles: HashMap::new(),
         pairing: Profile::Pc,
         preferences: Preferences::default(),
+        wired: true,
         error: None,
     }
 }
@@ -55,6 +56,15 @@ fn the_menu_keeps_pairing_wired_and_settings_while_a_host_is_connected() {
     assert!(rows.iter().any(|row| matches!(row, MenuRow::Host(0))));
     assert!(rows.contains(&MenuRow::Pair));
     assert!(rows.contains(&MenuRow::Wired));
+    assert_eq!(rows.last(), Some(&MenuRow::Settings));
+}
+
+#[test]
+fn the_wired_row_is_hidden_when_the_model_has_no_backend() {
+    let mut settings = settings_with_one_host();
+    settings.wired = false;
+    let rows = settings.rows();
+    assert!(!rows.contains(&MenuRow::Wired));
     assert_eq!(rows.last(), Some(&MenuRow::Settings));
 }
 
@@ -165,6 +175,7 @@ fn settings_rows_show_the_current_values() {
             dpad: DpadMode::LeftStick,
             rumble: RumbleStrength::Low,
         },
+        wired: true,
         error: None,
     };
     let view = view_for(

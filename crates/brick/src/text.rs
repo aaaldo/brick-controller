@@ -57,8 +57,18 @@ impl Fonts {
         }
     }
 
+    /// Set the scale applied to every requested size.
+    ///
+    /// The UI expresses its sizes against a 1024-wide reference; a panel of a
+    /// different width passes the same factor as the layout so text and
+    /// spacing shrink together. Invalid values are ignored rather than
+    /// poisoning every later measurement. The cache is cleared so a scale
+    /// change cannot leave glyphs at the old size.
     pub fn set_scale(&mut self, scale: f32) {
-        self.scale = scale;
+        if scale.is_finite() && scale > 0.0 {
+            self.scale = scale;
+            self.cache.clear();
+        }
     }
 
     /// Rasterise a glyph once per (character, size) and cache the coverage.
@@ -246,5 +256,23 @@ mod tests {
             assert!(fonts.measure(line, 30.0) <= 200, "{line}");
         }
         assert_eq!(fonts.wrap("short", 30.0, 200, 2), vec!["short"]);
+    }
+
+    #[test]
+    fn scaling_changes_measurements_and_ignores_invalid_values() {
+        let mut fonts = Fonts::load(&[]);
+        let normal = fonts.measure("Brick", 30.0);
+        fonts.set_scale(0.5);
+        let half = fonts.measure("Brick", 30.0);
+        assert!(half < normal, "a smaller scale must shrink the text");
+
+        fonts.set_scale(0.0);
+        fonts.set_scale(-1.0);
+        fonts.set_scale(f32::NAN);
+        assert_eq!(
+            fonts.measure("Brick", 30.0),
+            half,
+            "invalid scales are ignored"
+        );
     }
 }

@@ -12,6 +12,11 @@
 //! The same file lists the right stick's axes crossed (ABS_RY as X), but on
 //! the device they are not: tested on a PC, pushing right moved ABS_RX.
 //!
+//! The H700 reports a different layout: its face buttons are swapped, the
+//! left stick is on ABS_Z/ABS_RZ, and L2/R2 are digital buttons. Those events
+//! are translated by `input_h700` into the normalized codes below before
+//! `Mapper` sees them, so the reader and the profiles stay shared.
+//!
 //! This is the platform input reader, not a controller profile. The pure pad
 //! state it fills lives in `input.rs`; profiles translate that state into
 //! their own reports.
@@ -23,11 +28,24 @@ use std::io::{self, Read};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, RawFd};
 
-const EV_SYN: u16 = 0;
-const EV_KEY: u16 = 1;
-const EV_ABS: u16 = 3;
+pub(crate) const EV_SYN: u16 = 0;
+pub(crate) const EV_KEY: u16 = 1;
+pub(crate) const EV_ABS: u16 = 3;
 
-const BTN_SOUTH: u16 = 304;
+// The normalized gamepad layout. These are the codes the Brick reports; H700
+// events are translated into this layout by `input_h700` before they reach
+// `Mapper`.
+pub(crate) const BTN_SOUTH: u16 = 304;
+pub(crate) const BTN_EAST: u16 = 305;
+/// The handheld's X (top) and Y (left) buttons.
+pub(crate) const KEY_X: u16 = 308;
+pub(crate) const KEY_Y: u16 = 307;
+pub(crate) const BTN_TL: u16 = 310;
+pub(crate) const BTN_TR: u16 = 311;
+pub(crate) const BTN_SELECT: u16 = 314;
+pub(crate) const BTN_START: u16 = 315;
+pub(crate) const BTN_MODE: u16 = 316;
+pub(crate) const BTN_THUMBL: u16 = 317;
 /// The last code of the contiguous gamepad range.
 ///
 /// On the Brick, 317/318 are the front function keys, mapped to L3/R3 because
@@ -35,19 +53,16 @@ const BTN_SOUTH: u16 = 304;
 /// L3/R3 buttons; its Fn keys report KEY_F1/KEY_F2 (59/60), outside this
 /// range, and stay unmapped. `BTN_THUMBR` lets the mapper recognise the whole
 /// gamepad range without listing each code; X and Y are handled by name below.
-const BTN_THUMBR: u16 = 318;
-/// The handheld's X (top) and Y (left) buttons.
-const KEY_X: u16 = 308;
-const KEY_Y: u16 = 307;
+pub(crate) const BTN_THUMBR: u16 = 318;
 
-const ABS_X: u16 = 0;
-const ABS_Y: u16 = 1;
-const ABS_Z: u16 = 2;
-const ABS_RX: u16 = 3;
-const ABS_RY: u16 = 4;
-const ABS_RZ: u16 = 5;
-const ABS_HAT0X: u16 = 16;
-const ABS_HAT0Y: u16 = 17;
+pub(crate) const ABS_X: u16 = 0;
+pub(crate) const ABS_Y: u16 = 1;
+pub(crate) const ABS_Z: u16 = 2;
+pub(crate) const ABS_RX: u16 = 3;
+pub(crate) const ABS_RY: u16 = 4;
+pub(crate) const ABS_RZ: u16 = 5;
+pub(crate) const ABS_HAT0X: u16 = 16;
+pub(crate) const ABS_HAT0Y: u16 = 17;
 
 /// A trigger counts as a button press past this share of its travel.
 ///
@@ -87,53 +102,14 @@ fn eviocgabs(abs: u16) -> libc::c_ulong {
         | (0x40 + abs as libc::c_ulong)
 }
 
-pub fn pad_path() -> String {
-    if Model::current() != Model::Rg40xxH {
-        return brick::input::pad_path();
+/// Locate the gamepad node. The Brick and the H700 use different evdev names;
+/// an H700 without its expected node is an error rather than a guess at an
+/// event number that may belong to another device.
+pub fn pad_path() -> Result<String, String> {
+    if Model::current() == Model::Rg40xxH {
+        return super::input_h700::pad_path();
     }
-    let devices = std::fs::read_to_string("/proc/bus/input/devices").unwrap_or_default();
-    devices
-        .split("\n\n")
-        .find(|block| {
-            block
-                .lines()
-                .any(|line| line == "N: Name=\"ANBERNIC-keys\"")
-        })
-        .and_then(|block| {
-            block
-                .lines()
-                .find_map(|line| line.strip_prefix("H: Handlers="))
-        })
-        .and_then(|handlers| {
-            handlers
-                .split_whitespace()
-                .find(|name| name.starts_with("event"))
-        })
-        .map(|name| format!("/dev/input/{name}"))
-        .unwrap_or_else(|| "/dev/input/event1".into())
-}
-
-// Translate the H700 evdev layout into the normalized layout used by Mapper.
-// Its digital L2/R2 buttons represent the full travel of the trigger axes.
-fn normalize_h700(kind: u16, code: u16, value: i32) -> (u16, u16, i32) {
-    match (kind, code) {
-        (EV_KEY, 304) => (EV_KEY, 305, value),
-        (EV_KEY, 305) => (EV_KEY, 304, value),
-        (EV_KEY, 306) => (EV_KEY, KEY_Y, value),
-        (EV_KEY, 307) => (EV_KEY, KEY_X, value),
-        (EV_KEY, 308) => (EV_KEY, 310, value),
-        (EV_KEY, 309) => (EV_KEY, 311, value),
-        (EV_KEY, 310) => (EV_KEY, 314, value),
-        (EV_KEY, 311) => (EV_KEY, 315, value),
-        (EV_KEY, 312) => (EV_KEY, 316, value),
-        (EV_KEY, 313) => (EV_KEY, 317, value),
-        (EV_KEY, 314) => (EV_ABS, ABS_Z, if value == 0 { 0 } else { 255 }),
-        (EV_KEY, 315) => (EV_ABS, ABS_RZ, if value == 0 { 0 } else { 255 }),
-        (EV_KEY, 316) => (EV_KEY, 318, value),
-        (EV_ABS, ABS_Z) => (EV_ABS, ABS_X, value),
-        (EV_ABS, ABS_RZ) => (EV_ABS, ABS_Y, value),
-        _ => (kind, code, value),
-    }
+    Ok(brick::input::pad_path())
 }
 
 /// Turns evdev events into gamepad state. Separate from the file so the
@@ -270,12 +246,9 @@ impl Pad {
         let mut ranges = Mapper::default().ranges;
         for (i, slot) in ranges.iter_mut().enumerate() {
             let axis = if h700 {
-                match i {
-                    0 => ABS_Z,
-                    1 => ABS_RZ,
-                    3 => ABS_RX,
-                    4 => ABS_RY,
-                    _ => continue,
+                match super::input_h700::axis_for_slot(i) {
+                    Some(axis) => axis,
+                    None => continue,
                 }
             } else {
                 i as u16
@@ -347,7 +320,7 @@ impl Pad {
                 );
             }
             let (kind, code, value) = if self.h700 {
-                normalize_h700(ev.kind, ev.code, ev.value)
+                super::input_h700::normalize(ev.kind, ev.code, ev.value)
             } else {
                 (ev.kind, ev.code, ev.value)
             };
@@ -412,7 +385,7 @@ mod tests {
             (EV_KEY, 314, 1),
             (EV_KEY, 315, 1),
         ] {
-            let (kind, code, value) = normalize_h700(kind, code, value);
+            let (kind, code, value) = crate::platform::input_h700::normalize(kind, code, value);
             mapper.apply(kind, code, value);
         }
         assert_eq!(mapper.state.sticks, [255, 0, 0, 255]);

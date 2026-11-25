@@ -22,7 +22,8 @@ const SYSTEM_INIT: &str = "/etc/bluetooth/bluetoothd";
 const DAEMON: &str = "/usr/bin/bluetoothd";
 const CONFIG: &str = "/tmp/brick-controller-bluetooth.conf";
 /// Present while our daemon stands in for the system's. Holds "1" when the
-/// system's was running and has to be started again.
+/// system's daemon was already running and must be started again, "0" when the
+/// wrapper started it only for this session or it was off.
 pub const MARKER: &str = "/tmp/brick-controller-bluetoothd";
 
 /// The daemon cannot start because the adapter is absent.
@@ -49,6 +50,30 @@ fn daemon_running() -> bool {
         .stdout(Stdio::null())
         .status()
         .is_ok_and(|s| s.success())
+}
+
+/// The Bluetooth daemon path.
+///
+/// H700 keeps its daemon in `/usr/libexec/bluetooth/bluetoothd`, and
+/// `launch.sh` passes that path through `NEXTUI_BLUETOOTHD`. Validate the
+/// value before executing it: the wrapper is privileged, but a bad environment
+/// must not turn into an arbitrary program launch.
+fn daemon_path() -> std::path::PathBuf {
+    if let Some(path) = std::env::var_os("NEXTUI_BLUETOOTHD").map(std::path::PathBuf::from) {
+        if valid_daemon_path(&path) {
+            return path;
+        }
+        eprintln!("bluez: ignoring invalid NEXTUI_BLUETOOTHD={path:?}");
+    }
+    std::path::PathBuf::from(DAEMON)
+}
+
+fn valid_daemon_path(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(metadata) = path.metadata() else {
+        return false;
+    };
+    path.is_absolute() && metadata.is_file() && metadata.uid() == 0 && metadata.mode() & 0o022 == 0
 }
 
 /// Stop everything that could own the HID PSMs before starting our daemon.
@@ -128,7 +153,15 @@ impl Daemon {
         // these lines must still tell `launch.sh` whether the system daemon was
         // running when the app took over.
         let was_running = daemon_running();
-        std::fs::write(MARKER, if was_running { "1" } else { "0" }).map_err(|e| e.to_string())?;
+        // The wrapper may have started Bluetooth only for this session (H700
+        // with Bluetooth off at launch). In that case restore must stop our
+        // daemon but must not start NextUI's.
+        let wrapper_started = std::env::var("BRICK_CONTROLLER_BT_STARTED")
+            .map(|value| value == "1")
+            .unwrap_or(false);
+        let restore_on_exit = was_running && !wrapper_started;
+        std::fs::write(MARKER, if restore_on_exit { "1" } else { "0" })
+            .map_err(|e| e.to_string())?;
         stop_all_daemons();
         // Peripheral, gamepad. The name is set here too so even the very first
         // inquiry answer carries it.
@@ -148,7 +181,7 @@ impl Daemon {
         let _ = Command::new("hciconfig")
             .args(["hci0", "lp", "RSWITCH"])
             .status();
-        let daemon = std::env::var_os("NEXTUI_BLUETOOTHD").unwrap_or_else(|| DAEMON.into());
+        let daemon = daemon_path();
         let child = Command::new(daemon)
             .args(["-n", "-P", "input,hog", "-f", CONFIG])
             .stdin(Stdio::null())

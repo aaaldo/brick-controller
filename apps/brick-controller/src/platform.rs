@@ -10,6 +10,7 @@
 //! with different peripherals.
 
 pub mod display;
+mod input_h700;
 pub mod input_trimui;
 pub mod model;
 pub mod rumble;

@@ -47,8 +47,6 @@ macro_rules! keys {
 
 keys! {
     AppName,
-    H700AdaptationCredit,
-    PadpodSource,
     Connected,
     Devices,
     ControllerType,
@@ -127,8 +125,6 @@ pub fn fill(template: &str, args: &[(&str, &str)]) -> String {
 fn english(key: Key) -> &'static str {
     match key {
         Key::AppName => "Brick Controller",
-        Key::H700AdaptationCredit => "H700 adaptation by Codex · Padpod by ligt",
-        Key::PadpodSource => "github.com/duyquang6/padpod",
         Key::Connected => "Connected",
         Key::Devices => "Devices",
         Key::ControllerType => "Controller type",
@@ -150,9 +146,7 @@ fn english(key: Key) -> &'static str {
         Key::ReconnectingTo => "Reconnecting to {host}…",
         Key::WaitingForHost => "Waiting for a host…",
         Key::DisconnectHold => "Screen On / Disconnect (Hold)",
-        Key::ScreenOffHint => {
-            "Screen will switch off after 10s"
-        }
+        Key::ScreenOffHint => "Screen will switch off after 10s",
         Key::Confirm => "Confirm",
         Key::HoldTitle => "Hold to disconnect",
         Key::HoldMessage => "Release Menu + Start to cancel",
@@ -183,12 +177,10 @@ fn english(key: Key) -> &'static str {
         Key::BluetoothActivationError => {
             "A problem occurred during Bluetooth activation. Please try again."
         }
-        Key::UsbActivationError => {
-            "A problem occurred during USB activation. Please try again."
-        }
+        Key::UsbActivationError => "A problem occurred during USB activation. Please try again.",
         Key::UnsupportedDeviceTitle => "Unsupported device",
         Key::UnsupportedDeviceMessage => {
-            "Brick Controller supports the TrimUI Brick and Brick Pro only. Smart Pro support is planned."
+            "This model is not supported by this build of Brick Controller."
         }
     }
 }

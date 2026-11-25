@@ -14,9 +14,11 @@ then play.
 
 > **Status.** The Brick is supported. The Brick Pro uses the same `tg5040`
 > package and code path, but has not yet been validated on Brick Pro hardware.
-> Smart Pro and `tg5050` are not supported yet: the app refuses to start on
-> them. Bluetooth supports PC, Xbox, PlayStation and Switch identities; the
-> wired mode is PC only and is still in development.
+> The RG40XX H on H700 is an experimental, community-contributed port; it is
+> built from source and installed in `Tools/h700`, and the wired PC mode is not
+> available on it. Smart Pro and `tg5050` are not supported yet: the app refuses
+> to start on them. Bluetooth supports PC, Xbox, PlayStation and Switch
+> identities; the wired mode is PC only and is still in development.
 
 > **Found a problem?** Brick Controller is a community Pak; NextUI maintainers
 > do not provide support for it. Open a bug report from the repository's
@@ -71,9 +73,11 @@ left/right changes its value, and **B** returns to Devices.
 
 ### What you need
 
-- A TrimUI Brick or Brick Pro running NextUI (`tg5040`).
+- A TrimUI Brick or Brick Pro running NextUI (`tg5040`), or an RG40XX H running
+  NextUI (`h700`) for the experimental build.
 - Bluetooth enabled in NextUI. The app starts its Bluetooth session before
-  showing **Devices**, so this is required even for the wired mode.
+  showing **Devices**, so this is required even for the wired mode. On H700, the
+  app starts Bluetooth for the session if it is off at launch.
 - The `Brick Controller.pak` folder, or the release zip.
 - A USB-C **data** cable for the wired mode. Use the **bottom** USB-C port; the
   top port is a USB host port.
@@ -83,17 +87,24 @@ ADB or SSH; ADB is unavailable while a wired session runs.
 
 ### RG40XX H on NextUI
 
-The development build supports the Anbernic RG40XX H on NextUI (`h700`).
-Other H700 models are outside the current hardware coverage. Build the Pak
-from source using the [build instructions](#build-from-source), then put it in
+The development build supports the Anbernic RG40XX H on NextUI (`h700`). This
+is a community-contributed, experimental port; it has not been validated by the
+project maintainers. Other H700 models are outside the current hardware
+coverage. Build the Pak from source using the
+[build instructions](#build-from-source), then put it in
 `Tools/h700/Brick Controller.pak/` on the SD card. Published v1.1.0 packages
 target the TrimUI Brick.
 
-The app starts Bluetooth for the session if it was off on launch. Both sticks
-and their click buttons are mapped, and the digital L2/R2 buttons send full
-trigger travel. Rumble is currently unavailable on the RG40XX H. The built-in
-panel blanks after 10 seconds with a connected host and wakes with **Menu+Start**.
-The app leaves the display alone when HDMI is connected.
+The app starts Bluetooth for the session if it was off on launch, and stops the
+daemons at exit without tearing down the adapter. Both sticks and their click
+buttons are mapped, and the digital L2/R2 buttons send full trigger travel.
+Rumble is currently unavailable on the RG40XX H. The built-in panel blanks after
+10 seconds with a connected host and wakes with **Menu+Start**. The app leaves
+the display alone when HDMI is connected.
+
+The wired USB mode is not available on H700: the ADB gadget backend is specific
+to `tg5040`, so **Wired connection** is hidden. Logs are written to
+`/mnt/SDCARD/.userdata/h700/logs/BrickController.txt`.
 
 ### Install
 
@@ -197,8 +208,9 @@ for a host or the identity offered to the next Bluetooth pairing.
 
 ## Good to know
 
-- **Wired mode is PC only.** It uses the bottom USB-C port and a data cable.
-  PlayStation, Switch and Xbox controllers remain Bluetooth-only.
+- **Wired mode is PC only and `tg5040` only.** It uses the bottom USB-C port and
+  a data cable. On H700 the row is hidden until a dedicated ADB gadget backend
+  exists. PlayStation, Switch and Xbox controllers remain Bluetooth-only.
 - **ADB is unavailable during a wired session.** The app borrows the USB gadget
   NextUI uses for ADB and restores it on exit. If ADB does not come back after a
   crash, relaunch the Pak or reboot the handheld.
@@ -242,7 +254,8 @@ Logs are written to:
 /mnt/SDCARD/.userdata/tg5040/logs/BrickController.txt
 ```
 
-The previous run is kept as `BrickController.txt.1` when the log rotates.
+On H700, use `/mnt/SDCARD/.userdata/h700/logs/BrickController.txt`. The
+previous run is kept as `BrickController.txt.1` when the log rotates.
 
 ### Reporting a bug
 
@@ -278,6 +291,8 @@ or run:
 ```sh
 /mnt/SDCARD/.system/tg5040/etc/bluetooth/bt_init.sh start
 ```
+
+On H700, use `/mnt/SDCARD/.system/h700/etc/bluetooth/bt_init.sh start`.
 
 If ADB does not come back after a wired session, quit and relaunch the Pak. The
 launch wrapper runs the binary's `restore` subcommand, which puts the NextUI USB
@@ -330,7 +345,8 @@ licensed under the GNU GPL v3 with additional terms. The license and credits
 travel with the pak (`LICENSE`, `ADDITIONAL-TERMS.md`, `CREDITS.md`, `OFL.txt`).
 
 This modified version is released under the same GPL-3.0 terms and additional
-terms as Padpod. It is not an official Padpod release.
+terms as Padpod. It is not an official Padpod release. The H700/RG40XX H
+adaptation is a community contribution, released under the same terms.
 
 The Switch Pro Controller protocol implementation is ported from
 [deck-as-controller](https://github.com/jmedina21/deck-as-controller) (MIT).

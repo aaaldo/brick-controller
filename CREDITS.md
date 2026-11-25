@@ -14,6 +14,7 @@ v3 with additional terms; those terms travel with this project.
 | Work | License | What Brick Controller uses | Where |
 |---|---|---|---|
 | [Padpod](https://github.com/duyquang6/padpod), by ligt and its contributors | GPL-3.0 with additional terms | The original TrimUI Brick Pro Bluetooth controller this project is based on | `LICENSE`, `ADDITIONAL-TERMS.md` |
+| RG40XX H/H700 adaptation, community contribution | GPL-3.0 with additional terms | H700 input mapping, display blanking, HDMI handling and launch wiring | `apps/brick-controller/src/platform/input_h700.rs`, `apps/brick-controller/deploy/launch.sh` |
 | [Nunito](https://github.com/googlefonts/nunito), by The Nunito Project Authors | SIL Open Font License 1.1 | The interface font, subset | `crates/brick/assets/` (with `OFL.txt`) |
 | [Apostrophe](https://github.com/Helaas/Apostrophe), by Helaas | MIT | NextUI layout metrics and widget behaviour used as the design reference | `apps/brick-controller/src/ui.rs` |
 | [deck-as-controller](https://github.com/jmedina21/deck-as-controller), by jmedina21 | MIT | Switch Pro Controller protocol, descriptor and subcommand handling, ported to Rust | `apps/brick-controller/src/profiles/switch_pro.rs` |
