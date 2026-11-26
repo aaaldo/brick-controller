@@ -26,36 +26,32 @@ mod usb;
 
 use bluetooth::bluez;
 use platform::{display, rumble};
+use std::process::ExitCode;
 
-fn main() {
-    // `launch.sh` calls this after a crash, when no Rust value got the chance
-    // to run its `Drop`. Every step is idempotent and safe when the app exited
-    // normally: a missing marker file means there is nothing to restore.
-    if std::env::args().nth(1).as_deref() == Some("restore") {
-        // The wired session borrows the ADB gadget; put it back before the
-        // system Bluetooth daemon is restarted.
-        #[cfg(target_os = "linux")]
-        usb::restore_after_crash();
-        bluez::restore_system_daemon();
-        rumble::stop();
-        if let Err(e) = display::restore() {
-            eprintln!("display: could not restore the panel: {e}");
-        }
-        return;
-    }
-    // A wired session killed before its `Drop` ran leaves g1 in the HID shape.
-    // Restore it before any Bluetooth takeover, so the next launch starts with
-    // ADB and the system gadget available again.
+fn main() -> ExitCode {
+    let restore_only = std::env::args().nth(1).as_deref() == Some("restore");
+    // The launcher calls `restore` before sampling Bluetooth and at exit.
+    // Direct launches also recover crashes before taking a fresh snapshot.
+    // Restore the wired gadget first so ADB is available again.
     #[cfg(target_os = "linux")]
     usb::restore_after_crash();
-    // `launch.sh` already runs `restore` on exit, but a wrapper killed before
-    // its EXIT trap would leave the panel dark. This call is idempotent and
-    // cheap, and also covers a crash that happened outside the wrapper.
+    let bluetooth = bluez::restore_system_daemon();
+    if restore_only {
+        rumble::stop();
+    }
     if let Err(e) = display::restore() {
         eprintln!("display: could not restore the previous session: {e}");
     }
+    if let Err(e) = bluetooth {
+        eprintln!("bluez: could not restore the previous session: {e}");
+        return ExitCode::FAILURE;
+    }
+    if restore_only {
+        return ExitCode::SUCCESS;
+    }
     if let Err(e) = app::run() {
         eprintln!("brick-controller: {e}");
-        std::process::exit(1);
+        return ExitCode::FAILURE;
     }
+    ExitCode::SUCCESS
 }

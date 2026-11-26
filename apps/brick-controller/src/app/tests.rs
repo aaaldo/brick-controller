@@ -1,10 +1,11 @@
 // Copyright 2026 the Brick Controller contributors
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Application-level tests: view-model navigation and settings.
+//! Application-level tests: session transitions, view-model navigation and settings.
 //! Protocol tests live next to their profile module; screen previews live in
 //! `ui/preview.rs`.
 
+use super::session::SessionOutcome;
 use super::settings::{Preferences, RumbleStrength, Settings};
 use super::view_model::{
     changing_type_modal, move_cursor, nav_dir, returning_to_devices_modal, view_for,
@@ -17,6 +18,25 @@ use crate::input::{DpadMode, Hat};
 use crate::profiles::Profile;
 use crate::ui::View;
 use std::collections::HashMap;
+
+#[test]
+fn only_profile_switches_keep_the_bluetooth_takeover() {
+    for profile in [Profile::PlayStation, Profile::Switch, Profile::Pc] {
+        assert!(SessionOutcome::SwitchProfile {
+            profile,
+            connect: None,
+            pairing: true,
+        }
+        .keeps_bluetooth_takeover());
+    }
+    for outcome in [
+        SessionOutcome::Retry,
+        SessionOutcome::Wired,
+        SessionOutcome::Quit,
+    ] {
+        assert!(!outcome.keeps_bluetooth_takeover());
+    }
+}
 
 fn settings_with_one_host() -> Settings {
     Settings {

@@ -140,6 +140,12 @@ pub(crate) enum SessionOutcome {
     Wired,
 }
 
+impl SessionOutcome {
+    pub(super) fn keeps_bluetooth_takeover(&self) -> bool {
+        matches!(self, Self::SwitchProfile { .. })
+    }
+}
+
 /// Release every button the host may still see held, in the profile's format.
 ///
 /// This runs before leaving the controller view. Without it, a button held
@@ -241,6 +247,7 @@ pub(crate) fn session(
     connect: Option<Address>,
     screen: &Renderer,
     pad: &mut Pad,
+    bluetooth: &mut bluez::Takeover,
 ) -> Result<SessionOutcome, String> {
     // The profile is not part of the Bluetooth events below; record it at the
     // start so a bug report shows which identity was active even when the
@@ -288,7 +295,7 @@ pub(crate) fn session(
         );
     }
 
-    let daemon = match bluez::Daemon::take_over(profile.bt_name(), profile.device_id()) {
+    let daemon = match bluetooth.start_daemon(profile.bt_name(), profile.device_id()) {
         Ok(d) => d,
         Err(e) => return fail(screen, pad, e, lang),
     };
@@ -1101,11 +1108,7 @@ pub(crate) fn session(
     drop(link);
     let _ = bus.set_discoverable(false);
     drop(bus);
-    if matches!(outcome, SessionOutcome::SwitchProfile { .. }) {
-        daemon.switch_profile();
-    } else {
-        drop(daemon);
-    }
+    drop(daemon);
     Ok(outcome)
 }
 
