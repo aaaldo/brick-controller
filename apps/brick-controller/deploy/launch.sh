@@ -107,7 +107,6 @@ SYNC_SETTINGS="${SYSTEM_PATH:-}/bin/syncsettings.elf"
 # Bluetooth off must not get it switched on behind their back at exit.
 BT_WAS_ON=0
 BT_STARTED=0
-pidof bluetoothd >/dev/null 2>&1 && BT_WAS_ON=1
 
 # Stop only the daemons, never `bt_init.sh stop`: the full stop can tear down
 # `hciattach` and make the adapter unavailable until a reboot.
@@ -143,6 +142,14 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+# A killed launcher may have left the dedicated daemon running, or no daemon
+# at all if it died during a profile switch. Recover before sampling NextUI.
+if ! "$DIR/brick-controller" restore >>"$LOG" 2>&1; then
+    echo "launch: could not recover the previous session" >>"$LOG"
+    exit 1
+fi
+pidof bluetoothd >/dev/null 2>&1 && BT_WAS_ON=1
 
 if [ "${PLATFORM:-}" = h700 ] && [ "$BT_WAS_ON" = 0 ] && [ -n "$NEXTUI_BT_INIT" ]; then
     BT_STARTED=1

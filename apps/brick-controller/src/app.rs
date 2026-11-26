@@ -12,6 +12,7 @@ mod view_model;
 #[cfg(target_os = "linux")]
 mod wired;
 
+use crate::bluetooth::bluez::Takeover;
 use crate::i18n::{tr, Key, Lang};
 use crate::input::Button;
 use crate::platform::input_trimui::{pad_path, Pad};
@@ -97,9 +98,16 @@ pub(crate) fn run() -> Result<(), String> {
     let mut start = StartScreen::Splash;
     // No host is reached until the user asks for it from Devices.
     let mut connect = None;
+    let mut bluetooth = Takeover::default();
     loop {
         save_mode(profile);
-        match session(profile, start, connect, &screen, &mut pad)? {
+        let outcome = session(profile, start, connect, &screen, &mut pad, &mut bluetooth)?;
+        if !outcome.keeps_bluetooth_takeover() {
+            bluetooth
+                .restore()
+                .map_err(|e| format!("could not restore Bluetooth: {e}"))?;
+        }
+        match outcome {
             SessionOutcome::Quit => break,
             SessionOutcome::SwitchProfile {
                 profile: next,
