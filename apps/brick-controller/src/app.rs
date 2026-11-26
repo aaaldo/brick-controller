@@ -12,6 +12,7 @@ mod view_model;
 #[cfg(target_os = "linux")]
 mod wired;
 
+use crate::bluetooth::bluez::Takeover;
 use crate::i18n::{tr, Key, Lang};
 use crate::input::Button;
 use crate::platform::input_trimui::{pad_path, Pad};
@@ -79,8 +80,10 @@ pub(crate) fn run() -> Result<(), String> {
     eprintln!("brick-controller {VERSION}");
     let canvas = Canvas::open("/dev/fb0").map_err(|e| format!("framebuffer: {e}"))?;
     let theme = Theme::load();
-    let fonts = Fonts::load(&crate::ui::font_paths());
-    let mut pad = Pad::open(&pad_path()).map_err(|e| format!("pad: {e}"))?;
+    let mut fonts = Fonts::load(&crate::ui::font_paths());
+    fonts.set_scale(crate::ui::layout_scale(&canvas));
+    let pad_path = pad_path()?;
+    let mut pad = Pad::open(&pad_path).map_err(|e| format!("pad: {e}"))?;
     let screen = Renderer::spawn(canvas, fonts, theme);
     // Refuse a model with no layout before touching Bluetooth: the Smart Pro
     // shares tg5040 with the Brick but has a 1280x720 panel, and a cropped
@@ -95,9 +98,16 @@ pub(crate) fn run() -> Result<(), String> {
     let mut start = StartScreen::Splash;
     // No host is reached until the user asks for it from Devices.
     let mut connect = None;
+    let mut bluetooth = Takeover::default();
     loop {
         save_mode(profile);
-        match session(profile, start, connect, &screen, &mut pad)? {
+        let outcome = session(profile, start, connect, &screen, &mut pad, &mut bluetooth)?;
+        if !outcome.keeps_bluetooth_takeover() {
+            bluetooth
+                .restore()
+                .map_err(|e| format!("could not restore Bluetooth: {e}"))?;
+        }
+        match outcome {
             SessionOutcome::Quit => break,
             SessionOutcome::SwitchProfile {
                 profile: next,

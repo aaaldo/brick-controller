@@ -20,6 +20,7 @@ struct Glyph {
 pub struct Fonts {
     /// Tried in order; a character is drawn with the first face that has it.
     faces: Vec<fontdue::Font>,
+    scale: f32,
     cache: HashMap<(char, u32), Glyph>,
 }
 
@@ -51,7 +52,22 @@ impl Fonts {
         faces.push(parse(EMBEDDED).expect("the embedded font parses"));
         Self {
             faces,
+            scale: 1.0,
             cache: HashMap::new(),
+        }
+    }
+
+    /// Set the scale applied to every requested size.
+    ///
+    /// The UI expresses its sizes against a 1024-wide reference; a panel of a
+    /// different width passes the same factor as the layout so text and
+    /// spacing shrink together. Invalid values are ignored rather than
+    /// poisoning every later measurement. The cache is cleared so a scale
+    /// change cannot leave glyphs at the old size.
+    pub fn set_scale(&mut self, scale: f32) {
+        if scale.is_finite() && scale > 0.0 {
+            self.scale = scale;
+            self.cache.clear();
         }
     }
 
@@ -62,6 +78,7 @@ impl Fonts {
     /// between values that would round to the same pixel size but rasterise
     /// differently.
     fn glyph(&mut self, ch: char, size: f32) -> &Glyph {
+        let size = size * self.scale;
         let faces = &self.faces;
         self.cache.entry((ch, size.to_bits())).or_insert_with(|| {
             let face = faces
@@ -239,5 +256,23 @@ mod tests {
             assert!(fonts.measure(line, 30.0) <= 200, "{line}");
         }
         assert_eq!(fonts.wrap("short", 30.0, 200, 2), vec!["short"]);
+    }
+
+    #[test]
+    fn scaling_changes_measurements_and_ignores_invalid_values() {
+        let mut fonts = Fonts::load(&[]);
+        let normal = fonts.measure("Brick", 30.0);
+        fonts.set_scale(0.5);
+        let half = fonts.measure("Brick", 30.0);
+        assert!(half < normal, "a smaller scale must shrink the text");
+
+        fonts.set_scale(0.0);
+        fonts.set_scale(-1.0);
+        fonts.set_scale(f32::NAN);
+        assert_eq!(
+            fonts.measure("Brick", 30.0),
+            half,
+            "invalid scales are ignored"
+        );
     }
 }

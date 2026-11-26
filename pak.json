@@ -1,12 +1,13 @@
 {
   "name": "Brick Controller",
-  "version": "v1.1.0",
+  "version": "v1.2.0",
   "type": "TOOL",
-  "description": "Bluetooth HID gamepad for the TrimUI Brick and Brick Pro: PC, Xbox, PS4 and Switch identities, on-device settings, no host driver. Brick Pro support is not yet hardware-validated; Smart Pro is not supported.",
+  "description": "Bluetooth HID gamepad for the TrimUI Brick, Brick Pro and Anbernic RG40XX H on NextUI: PC, Xbox, PS4 and Switch identities, on-device settings, no host driver. Wired USB is temporarily hidden in v1.2.0. Brick Pro support is not yet hardware-validated; Smart Pro is not supported.",
   "author": "Brick Controller contributors",
   "repo_url": "https://github.com/aaaldo/brick-controller",
   "release_filename": "Brick.Controller.pak.zip",
   "changelog": {
+    "v1.2.0": "Adds RG40XX H support on NextUI (h700): H700 input mapping, display blanking, HDMI handling and launch wiring. Hides the wired USB option from Devices while the H700/ADB backend is validated. Improves Bluetooth profile switching and stale-marker recovery. Brick and Brick Pro behavior is unchanged.",
     "v1.1.0": "Adds a Settings screen with D-Pad Mode (D-Pad or Left Stick) and Rumble strength (Off, Low, Mid, Strong). Preferences persist across restarts. Refreshes the disconnect overlay and controller hints.",
     "v1.0.0": "First public release. Bluetooth HID gamepad for the TrimUI Brick and Brick Pro, with PC, Xbox, PlayStation and Switch identities. Brick Pro support is implemented but not yet hardware-validated. Smart Pro is refused at startup."
   },
@@ -19,5 +20,5 @@
     "brick-ui-mockups/actual/confirm.png",
     "brick-ui-mockups/actual/hold.png"
   ],
-  "platforms": ["tg5040"]
+  "platforms": ["tg5040", "h700"]
 }

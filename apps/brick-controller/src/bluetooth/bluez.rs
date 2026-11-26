@@ -7,12 +7,14 @@
 //! *host* side and holds L2CAP channels 17 and 19 - exactly the two a HID
 //! *device* has to listen on. So for as long as the app runs, the system's
 //! daemon is stopped and one of our own runs without that plugin, as a gamepad
-//! (class 0x002508). The system's comes back on exit, and `launch.sh` does the
-//! same after a crash, from the marker left in `/tmp`.
+//! (class 0x002508). The system's comes back when the takeover ends. After a
+//! crash, the launcher uses the marker in `/tmp` to finish restoring it.
 //!
 //! Pairings are kept: both daemons store link keys in the same place.
 
 use std::collections::HashMap;
+use std::io;
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 use zbus::blocking::Connection;
@@ -22,8 +24,9 @@ const SYSTEM_INIT: &str = "/etc/bluetooth/bluetoothd";
 const DAEMON: &str = "/usr/bin/bluetoothd";
 const CONFIG: &str = "/tmp/brick-controller-bluetooth.conf";
 /// Present while our daemon stands in for the system's. Holds "1" when the
-/// system's was running and has to be started again.
-pub const MARKER: &str = "/tmp/brick-controller-bluetoothd";
+/// system's daemon was already running and must be started again, "0" when the
+/// wrapper started it only for this session or it was off.
+const MARKER: &str = "/tmp/brick-controller-bluetoothd";
 
 /// The daemon cannot start because the adapter is absent.
 ///
@@ -51,13 +54,37 @@ fn daemon_running() -> bool {
         .is_ok_and(|s| s.success())
 }
 
+/// The Bluetooth daemon path.
+///
+/// H700 keeps its daemon in `/usr/libexec/bluetooth/bluetoothd`, and
+/// `launch.sh` passes that path through `NEXTUI_BLUETOOTHD`. Validate the
+/// value before executing it: the wrapper is privileged, but a bad environment
+/// must not turn into an arbitrary program launch.
+fn daemon_path() -> std::path::PathBuf {
+    if let Some(path) = std::env::var_os("NEXTUI_BLUETOOTHD").map(std::path::PathBuf::from) {
+        if valid_daemon_path(&path) {
+            return path;
+        }
+        eprintln!("bluez: ignoring invalid NEXTUI_BLUETOOTHD={path:?}");
+    }
+    std::path::PathBuf::from(DAEMON)
+}
+
+fn valid_daemon_path(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(metadata) = path.metadata() else {
+        return false;
+    };
+    path.is_absolute() && metadata.is_file() && metadata.uid() == 0 && metadata.mode() & 0o022 == 0
+}
+
 /// Stop everything that could own the HID PSMs before starting our daemon.
 ///
 /// `bt_init.sh stop` is deliberately not used on tg5040: it also tears down
 /// `hciattach`, and bringing the adapter back takes far longer than restarting
 /// the daemon. Waiting for `bluetoothd` to disappear avoids a race where our
 /// daemon starts while the old one still holds the profile.
-fn stop_all_daemons() {
+fn stop_all_daemons() -> io::Result<()> {
     let _ = Command::new(SYSTEM_INIT)
         .arg("stop")
         .stdout(Stdio::null())
@@ -75,61 +102,98 @@ fn stop_all_daemons() {
         .arg("bluetoothd")
         .stderr(Stdio::null())
         .status();
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while daemon_running() && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    wait_for_daemon(false)
 }
 
-/// Put the system's daemon back if a session left it stopped. `launch.sh`
-/// runs this after the app exits, whatever the exit was.
-pub fn restore_system_daemon() {
-    let Ok(was) = std::fs::read_to_string(MARKER) else {
-        return;
+fn wait_for_daemon(running: bool) -> io::Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while daemon_running() != running {
+        if Instant::now() >= deadline {
+            let action = if running { "start" } else { "stop" };
+            return Err(io::Error::other(format!("bluetoothd did not {action}")));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Ok(())
+}
+
+/// Consume a previous takeover's marker before sampling NextUI's state. Keep
+/// the snapshot available to the next recovery attempt if restoration fails.
+pub(crate) fn restore_system_daemon() -> io::Result<()> {
+    restore_marker(Path::new(MARKER), restore_daemons)
+}
+
+fn restore_marker(marker: &Path, restore: impl FnOnce(bool) -> io::Result<()>) -> io::Result<()> {
+    let snapshot = match std::fs::read_to_string(marker) {
+        Ok(snapshot) => snapshot,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
     };
-    // Sniff mode back on (see `take_over`): the controller keeps its link
+    let restart = match snapshot.trim() {
+        "1" => true,
+        "0" => false,
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid Bluetooth marker",
+            ));
+        }
+    };
+    eprintln!("bluez: restoring Bluetooth marker (restart NextUI: {restart})");
+    restore(restart)?;
+    std::fs::remove_file(marker)
+}
+
+fn restore_daemons(restart: bool) -> io::Result<()> {
+    // Sniff mode back on (see `start_daemon`): the controller keeps its link
     // policy across daemons, so a crash would otherwise leave it off.
     let _ = Command::new("hciconfig")
         .args(["hci0", "lp", "RSWITCH,SNIFF"])
         .status();
-    stop_all_daemons();
+    stop_all_daemons()?;
     let _ = std::fs::remove_file(CONFIG);
-    if was.trim() == "1" {
-        if let Some(script) = nextui_bt_init() {
-            let _ = Command::new("sh")
-                .arg(script)
-                .arg("start")
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+    if restart {
+        let mut init = if let Some(script) = nextui_bt_init() {
+            let mut init = Command::new("sh");
+            init.arg(script);
+            init
         } else {
-            let _ = Command::new(SYSTEM_INIT)
-                .arg("start")
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+            Command::new(SYSTEM_INIT)
+        };
+        let status = init.arg("start").status()?;
+        if !status.success() {
+            return Err(io::Error::other(format!("Bluetooth init failed: {status}")));
         }
+        // The launch wrapper samples the daemon after recovery, so also wait
+        // for init implementations that launch it asynchronously.
+        wait_for_daemon(true)?;
     }
-    let _ = std::fs::remove_file(MARKER);
+    Ok(())
 }
 
-pub struct Daemon {
-    child: Child,
+/// Owns the system-daemon snapshot across profile switches in this process.
+/// The on-disk copy is for recovery after the process dies.
+#[derive(Default)]
+pub(crate) struct Takeover {
+    active: bool,
 }
 
-impl Daemon {
-    /// `device_id` is the Device ID record's `usb:VVVV:PPPP:vvvv`, or None to
-    /// keep BlueZ's own.
-    pub fn take_over(name: &str, device_id: Option<String>) -> Result<Self, String> {
+impl Takeover {
+    /// Run BlueZ with the selected Device ID (`usb:VVVV:PPPP:vvvv`). Replacing
+    /// the dedicated daemon must not briefly advertise NextUI's generic ID.
+    pub(crate) fn start_daemon(
+        &mut self,
+        name: &str,
+        device_id: Option<String>,
+    ) -> Result<Daemon, String> {
         if !std::path::Path::new("/sys/class/bluetooth/hci0").exists() {
             return Err(BLUETOOTH_OFF.into());
         }
-        // The marker is written before anything is stopped: a crash between
-        // these lines must still tell `launch.sh` whether the system daemon was
-        // running when the app took over.
-        let was_running = daemon_running();
-        std::fs::write(MARKER, if was_running { "1" } else { "0" }).map_err(|e| e.to_string())?;
-        stop_all_daemons();
+        let wrapper_started =
+            std::env::var("BRICK_CONTROLLER_BT_STARTED").is_ok_and(|value| value == "1");
+        self.prepare_marker(Path::new(MARKER), wrapper_started, daemon_running)
+            .map_err(|e| format!("could not save the Bluetooth marker: {e}"))?;
+        stop_all_daemons().map_err(|e| e.to_string())?;
         // Peripheral, gamepad. The name is set here too so even the very first
         // inquiry answer carries it.
         let mut config = format!(
@@ -148,24 +212,72 @@ impl Daemon {
         let _ = Command::new("hciconfig")
             .args(["hci0", "lp", "RSWITCH"])
             .status();
-        let child = Command::new(DAEMON)
+        let daemon = daemon_path();
+        let child = Command::new(daemon)
             .args(["-n", "-P", "input,hog", "-f", CONFIG])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
             .map_err(|e| format!("could not start bluetoothd: {e}"))?;
-        Ok(Self { child })
+        Ok(Daemon(child))
+    }
+
+    fn prepare_marker(
+        &mut self,
+        marker: &Path,
+        wrapper_started: bool,
+        daemon_running: impl FnOnce() -> bool,
+    ) -> io::Result<()> {
+        if self.active {
+            eprintln!("bluez: reusing Bluetooth marker for profile switch");
+            return Ok(());
+        }
+        if marker.try_exists()? {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "pending Bluetooth recovery",
+            ));
+        }
+        // Publish the complete snapshot before stopping either system daemon.
+        let restart = !wrapper_started && daemon_running();
+        let pending = marker.with_extension("new");
+        std::fs::write(&pending, if restart { "1" } else { "0" })?;
+        std::fs::rename(pending, marker)?;
+        self.active = true;
+        eprintln!("bluez: refreshed Bluetooth marker (restart NextUI: {restart})");
+        Ok(())
+    }
+
+    pub(crate) fn restore(&mut self) -> io::Result<()> {
+        self.restore_with(restore_system_daemon)
+    }
+
+    fn restore_with(&mut self, restore: impl FnOnce() -> io::Result<()>) -> io::Result<()> {
+        if self.active {
+            restore()?;
+            self.active = false;
+        }
+        Ok(())
     }
 }
+
+impl Drop for Takeover {
+    fn drop(&mut self) {
+        if let Err(e) = self.restore() {
+            eprintln!("bluez: could not restore Bluetooth: {e}");
+        }
+    }
+}
+
+pub(crate) struct Daemon(Child);
 
 impl Drop for Daemon {
     fn drop(&mut self) {
         // `wait` before restoring: starting the system daemon while our child
         // still holds the adapter makes the new one miss `hci0`.
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        restore_system_daemon();
+        let _ = self.0.kill();
+        let _ = self.0.wait();
     }
 }
 
@@ -457,6 +569,98 @@ impl Bus {
                 eprintln!("bluez: could not forget {addr}: {e}");
                 false
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::mem::ManuallyDrop;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn test_marker() -> PathBuf {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        std::env::temp_dir().join(format!(
+            "brick-controller-bluetoothd-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
+    #[test]
+    fn profile_switches_keep_the_first_snapshot_until_exit() {
+        let marker = test_marker();
+        let mut takeover = ManuallyDrop::new(Takeover::default());
+        takeover.prepare_marker(&marker, false, || true).unwrap();
+        for _ in 0..3 {
+            takeover
+                .prepare_marker(&marker, false, || panic!("Bluetooth was already captured"))
+                .unwrap();
+            assert_eq!(std::fs::read_to_string(&marker).unwrap(), "1");
+        }
+        takeover
+            .restore_with(|| {
+                restore_marker(&marker, |restart| {
+                    assert!(restart);
+                    Ok(())
+                })
+            })
+            .unwrap();
+        assert!(!marker.exists());
+    }
+
+    #[test]
+    fn a_daemon_started_by_the_h700_wrapper_is_not_restarted() {
+        let marker = test_marker();
+        let mut takeover = ManuallyDrop::new(Takeover::default());
+        takeover.prepare_marker(&marker, true, || true).unwrap();
+        takeover.prepare_marker(&marker, true, || true).unwrap();
+        takeover
+            .restore_with(|| {
+                restore_marker(&marker, |restart| {
+                    assert!(!restart);
+                    Ok(())
+                })
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn a_crashed_takeover_must_be_recovered_before_a_fresh_snapshot() {
+        for original in [false, true] {
+            let marker = test_marker();
+            let mut crashed = ManuallyDrop::new(Takeover::default());
+            crashed.prepare_marker(&marker, false, || original).unwrap();
+            crashed
+                .prepare_marker(&marker, false, || panic!("Bluetooth was already captured"))
+                .unwrap();
+            let mut fresh = ManuallyDrop::new(Takeover::default());
+            let error = fresh
+                .prepare_marker(&marker, false, || {
+                    panic!("Bluetooth has not been recovered")
+                })
+                .unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+            assert!(restore_marker(&marker, |_| Err(io::Error::other("init failed"))).is_err());
+            assert!(marker.exists());
+            restore_marker(&marker, |restart| {
+                assert_eq!(restart, original);
+                Ok(())
+            })
+            .unwrap();
+            restore_marker(&marker, |_| panic!("the marker was already consumed")).unwrap();
+
+            fresh.prepare_marker(&marker, false, || !original).unwrap();
+            fresh
+                .restore_with(|| {
+                    restore_marker(&marker, |restart| {
+                        assert_ne!(restart, original);
+                        Ok(())
+                    })
+                })
+                .unwrap();
         }
     }
 }

@@ -101,13 +101,23 @@ pub fn pad_path() -> String {
 }
 
 pub fn parse_pad(devices: &str) -> Option<String> {
+    parse_pad_by_name(devices, "TRIMUI Player1")
+}
+
+/// Find a pad's event node by the name the kernel reports in
+/// `/proc/bus/input/devices`.
+///
+/// The H700 uses a different evdev name from the Brick, so the name is a
+/// parameter rather than a second copy of this parser.
+pub fn parse_pad_by_name(devices: &str, name: &str) -> Option<String> {
+    let needle = format!("N: Name=\"{name}\"");
     devices
         .split("\n\n")
-        .find(|block| block.lines().any(|l| l == "N: Name=\"TRIMUI Player1\""))?
+        .find(|block| block.lines().any(|line| line == needle))?
         .lines()
-        .find_map(|l| l.strip_prefix("H: Handlers="))?
+        .find_map(|line| line.strip_prefix("H: Handlers="))?
         .split_whitespace()
-        .find(|h| h.starts_with("event"))
+        .find(|handler| handler.starts_with("event"))
         .map(str::to_string)
 }
 
@@ -277,8 +287,13 @@ mod tests {
     #[test]
     fn finds_the_pad_by_name() {
         let devices = "N: Name=\"audiocodec sunxi Audio Jack\"\nH: Handlers=kbd event2 \n\n\
-                       N: Name=\"TRIMUI Player1\"\nH: Handlers=kbd js0 event4 \n";
+                       N: Name=\"TRIMUI Player1\"\nH: Handlers=kbd js0 event4 \n\n\
+                       N: Name=\"ANBERNIC-keys\"\nH: Handlers=kbd js1 event1 \n";
         assert_eq!(parse_pad(devices).as_deref(), Some("event4"));
+        assert_eq!(
+            parse_pad_by_name(devices, "ANBERNIC-keys").as_deref(),
+            Some("event1")
+        );
         assert_eq!(
             parse_pad("N: Name=\"other\"\nH: Handlers=kbd event3\n"),
             None

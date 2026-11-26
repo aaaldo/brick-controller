@@ -70,8 +70,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo build --release --target aarch64-unknown-linux-musl -p brick-controller
 
-VERSION=v1.1.0 ./apps/brick-controller/deploy/package.sh
-./scripts/check-pak.sh v1.1.0
+VERSION=v1.2.0 ./apps/brick-controller/deploy/package.sh
+./scripts/check-pak.sh v1.2.0
 ```
 
 Le binaire est **statique `aarch64-musl`** : aucun runtime Rust ni dépendance
@@ -452,10 +452,14 @@ Ne **jamais** installer dans `.system/` : ce dossier est remplacé à chaque mis
 `hciattach` et l'adaptateur, et empêche la reprise rapide. Arrêter uniquement
 `bluetoothd` et `bluealsa`.
 
-### H700 (plus tard)
+### H700 (RG40XX H, v1.2.0)
 
 - Backend séparé : systemd + `setBluetooth.sh` + `bt_init.sh`.
 - Ne pas réutiliser tel quel le backend `tg5040`.
+- Seul le RG40XX H est supporté pour l'instant : `launch.sh` refuse les autres
+  H700 et le mode filaire est masqué.
+- Le mapping d'entrée H700 vit dans `platform/input_h700.rs` ; le lecteur evdev
+  partagé reste dans `platform/input_trimui.rs`.
 - Certains modèles H700 n'ont pas de Bluetooth : détecter et afficher un
   message clair.
 
@@ -564,9 +568,10 @@ Règles :
   de sortie : aucune vibration.
 - Start et Select sont envoyés à l'hôte comme boutons de manette.
 - L'écran **Devices** est l'écran d'accueil. Il liste toujours les hôtes appairés,
-  puis **Pair a new device**, puis **Wired connection**, puis **Settings**, même
-  lorsqu'un hôte est connecté. Son footer propose **B Quit**, **X Forget** et
-  **A Connect** ; sur la ligne **Settings**, l'action devient **A Open**.
+  puis **Pair a new device**, puis **Settings** (la ligne **Wired connection**
+  est masquée en v1.2.0), même lorsqu'un hôte est connecté. Son footer propose
+  **B Quit**, **X Forget** et **A Connect** ; sur la ligne **Settings**, l'action
+  devient **A Open**.
   **X Forget** n'est affiché que sur une ligne d'hôte, jamais sur Pairing, Wired
   ni Settings. Oublier un hôte demande toujours confirmation. Il n'y a plus
   d'écran de détail ni de changement de type de contrôleur pour un hôte déjà
@@ -636,10 +641,16 @@ Règles :
 
 ### Mode filaire PC
 
+> **v1.2.0** : la ligne **Wired connection** est masquée dans Devices
+> (`WIRED_MODE_ENABLED = false` dans `app/settings.rs`). Le transport et les
+> écrans restent dans le code pour la validation H700/ADB ; réactiver le mode
+> consiste à remettre la constante à `true` et à refaire les tests matériels.
+
 - Le mode filaire est **PC uniquement** et utilise le port USB-C **inférieur**.
   Le port supérieur est un port hôte.
-- Il est accessible depuis Devices : `A` sur **Wired connection** arrête la
-  session Bluetooth, rend BlueZ au système, puis lance `app/wired.rs`.
+- Lorsqu'il est activé, il est accessible depuis Devices : `A` sur
+  **Wired connection** arrête la session Bluetooth, rend BlueZ au système, puis
+  lance `app/wired.rs`.
 - Le noyau stock n'a pas `f_hid` : le transport utilise FunctionFS et reprend
   `g1`, le gadget ADB, pour la session. Un seul gadget configfs est possible :
   `g1` est sauvegardé (identité, chaînes, liens de `configs/c.1`) dans
@@ -686,7 +697,7 @@ Après toute modification de code source :
 3. `cargo clippy --target aarch64-unknown-linux-musl --workspace --all-targets -- -D warnings`
 4. `cargo test --workspace`
 5. `cargo build --release --target aarch64-unknown-linux-musl -p brick-controller`
-6. packaging du `.pak`, puis `./scripts/check-pak.sh v1.1.0`
+6. packaging du `.pak`, puis `./scripts/check-pak.sh v1.2.0`
 7. test sur le Brick ou le Brick Pro
 
 L'étape 3 est indispensable au mode filaire : `usb/gadget.rs` et `app/wired.rs`
@@ -761,10 +772,10 @@ reconstruire avant le test.
   et reconnexion ;
 - sortie propre et restauration NextUI ;
 - crash de l'application et récupération ;
-- mode filaire : **Wired connection** sous Pair, `X Forget` masqué sur Pair et
-  Wired, écran d'attente câble débranché, bascule vers **Connected** au
-  branchement d'un PC, boutons/sticks/gâchettes, retour à l'attente au
-  débranchement ;
+- mode filaire (quand `WIRED_MODE_ENABLED` est réactivé) : **Wired connection**
+  sous Pair, `X Forget` masqué sur Pair et Wired, écran d'attente câble
+  débranché, bascule vers **Connected** au branchement d'un PC,
+  boutons/sticks/gâchettes, retour à l'attente au débranchement ;
 - mode filaire : Menu+Start maintenu 1 s, rapport neutre, popup
   **Returning to Devices…**, retour à Devices et reprise Bluetooth ;
 - mode filaire : ADB restauré à la sortie, puis après un crash et un `restore` ;
@@ -892,6 +903,7 @@ Le merge et le push restent soumis à approbation humaine.
   Bluetooth : l'UDC sunxi n'accepte pas l'endpoint interrupt OUT nécessaire.
 - **Phase 2** : Smart Pro (`tg5040`, 1280×720).
 - **Phase 3** : Smart Pro S `tg5050`.
-- **Phase 4** : H700, si nécessaire.
+- **Phase 4** : H700, RG40XX H supporté à partir de v1.2.0 ; le mode filaire
+  reste hors périmètre.
 - **Recherche séparée** : endpoint OUT de l'UDC sunxi (`f_hid` ou correctif
   noyau), si un mode filaire PlayStation devient une exigence.

@@ -1,21 +1,32 @@
 Brick Controller
 ================
 
-Turn a TrimUI Brick or Brick Pro into a Bluetooth or wired USB HID gamepad for
-a PC, Mac, Linux/SteamOS machine, Android device or iPad. Nothing has to be
-installed on the host.
+Turn a TrimUI Brick, Brick Pro or Anbernic RG40XX H into a Bluetooth HID
+gamepad for a PC, Mac, Linux/SteamOS machine, Android device or iPad. Nothing
+has to be installed on the host.
 
 Requirements
 ------------
-- A TrimUI Brick or Brick Pro running NextUI (tg5040).
+- A TrimUI Brick or Brick Pro running NextUI (tg5040), or an RG40XX H running
+  NextUI (h700).
 - Bluetooth enabled in NextUI. The app opens its Bluetooth session before
-  showing Devices, so this is required even for the wired mode.
-- A USB-C data cable for the wired PC mode. Use the bottom USB-C port; the top
-  port is a host port.
+  showing Devices. On H700, the app starts Bluetooth for the session if it is
+  off at launch.
+- A USB-C data cable only for development over ADB or SSH, or for the hidden
+  wired mode. Use the bottom USB-C port; the top port is a host port.
 - The Brick Pro uses the same package. Its support is implemented but has not
   yet been validated on Brick Pro hardware.
 - The Smart Pro and Smart Pro S are not supported yet. The app refuses to
   start on them.
+
+H700/RG40XX H (community port)
+------------------------------
+The v1.2.0 build supports the RG40XX H on H700. The port is community-
+contributed and was validated by the contributor on RG40XX H hardware. Other
+H700 models are refused. Install the Pak in Tools/h700/Brick Controller.pak/.
+The wired USB mode is temporarily hidden in v1.2.0. Rumble is not available on
+the RG40XX H. Logs are written to
+/mnt/SDCARD/.userdata/h700/logs/BrickController.txt.
 
 Installation
 ------------
@@ -27,8 +38,9 @@ Manual:
   2. Extract the archive contents into that folder.
   3. Open Tools > Brick Controller on the handheld.
 
+On the RG40XX H, use Tools/h700/Brick Controller.pak/ instead of tg5040.
 The launch.sh and brick-controller files must sit directly inside
-Tools/tg5040/Brick Controller.pak/.
+Brick Controller.pak/.
 
 Pairing
 -------
@@ -45,32 +57,21 @@ Pairing
 The type is chosen for the next pairing. To change the type of an already
 paired host, forget it on both sides and pair again.
 
-Wired PC mode
--------------
-1. Open Brick Controller so Devices is visible.
-2. Select Wired connection and press A.
-3. Connect the bottom USB-C port to the PC with a data cable.
-4. The screen switches to Connected and names the host PC (USB).
-5. Hold Menu+Start for 1 second to return to Devices.
-
-The wired mode is PC only. It publishes a standard HID gamepad; Windows,
-Linux/SteamOS, Android and applications that read HID directly see it. macOS
-does not expose a generic HID gamepad to GameController, so use a Bluetooth
-profile on Apple hosts.
-
-ADB is unavailable while the wired session runs: the app borrows the USB gadget
+Wired PC mode (development)
+---------------------------
+The wired USB mode is temporarily hidden from Devices in v1.2.0 while the
+H700/ADB backend is validated. The transport and screens remain in the source
+for development. When enabled, it is PC-only and uses the bottom USB-C port;
+ADB is unavailable while the wired session runs. The app borrows the USB gadget
 NextUI uses for it and restores it on exit, including after a crash.
 
 Controls
 --------
 Devices screen:
-  A  Connect the selected host, open Pair a new device, start Wired connection,
-     or open Settings (the label changes to Open on the Settings row)
+  A  Connect the selected host, open Pair a new device, or open Settings
+     (the label changes to Open on the Settings row)
   X  Forget the selected host (confirmation required; host rows only)
   B  Quit the app
-
-Wired waiting:
-  B  Return to Devices
 
 Settings:
   A          Open Settings from Devices
@@ -102,10 +103,10 @@ Switch       Switch Pro Controller identity. macOS, iPadOS and Windows.
 
 On Apple hosts, use Xbox, PlayStation or Switch. macOS does not expose a
 generic HID gamepad to its GameController framework. This also applies to the
-wired PC mode.
+development wired PC mode.
 
-The wired mode is independent of the Bluetooth profile: it always publishes the
-PC HID identity and does not change the type stored for a host.
+The development wired mode, when enabled, always publishes the PC HID identity
+and does not change the type stored for a host.
 
 Troubleshooting
 ---------------
@@ -115,13 +116,13 @@ Logs:
 If Bluetooth stays stopped after a crash:
   /mnt/SDCARD/.system/tg5040/etc/bluetooth/bt_init.sh start
 
-If ADB does not come back after a wired session, quit and relaunch the Pak. The
-launch wrapper runs the binary's restore command, which puts the NextUI USB
-gadget back before restarting Bluetooth. A reboot is the fallback.
+If ADB does not come back after a development wired session, quit and relaunch
+the Pak. The launch wrapper runs the binary's restore command, which puts the
+NextUI USB gadget back before restarting Bluetooth. A reboot is the fallback.
 
-If the host stops seeing the Brick at all after several wired sessions, unplug
-and replug the USB-C cable. Some hosts do not re-enumerate by themselves even
-when the Brick side is restored.
+If the host stops seeing the Brick at all after several development wired
+sessions, unplug and replug the USB-C cable. Some hosts do not re-enumerate by
+themselves even when the Brick side is restored.
 
 If the panel stays dark, press Menu+Start once. To restore NextUI's brightness
 and volume settings:

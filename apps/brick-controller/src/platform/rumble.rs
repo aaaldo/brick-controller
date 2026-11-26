@@ -54,6 +54,9 @@ impl Rumble {
     /// None when the pin is not there (another device, or spruce never
     /// exported it): the gamepad works the same, without rumble.
     pub fn open() -> Option<Self> {
+        if Model::current() == Model::Rg40xxH {
+            return None;
+        }
         let mut file = OpenOptions::new().write(true).open(GPIO).ok()?;
         let _ = file.write_all(b"0");
         let model = Model::current();
@@ -120,6 +123,9 @@ impl Drop for Rumble {
 /// Stop the motor directly. `launch.sh` calls this through `restore` after a
 /// crash, when no `Rumble` value got the chance to drop.
 pub fn stop() {
+    if Model::current() == Model::Rg40xxH {
+        return;
+    }
     if let Ok(mut file) = OpenOptions::new().write(true).open(GPIO) {
         let _ = file.write_all(b"0");
     }
