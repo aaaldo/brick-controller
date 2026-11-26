@@ -1,7 +1,7 @@
 # Brick Controller
 
-**Turn a TrimUI Brick or Brick Pro into a Bluetooth or wired USB gamepad. No
-driver on the host.**
+**Turn a TrimUI Brick, Brick Pro or Anbernic RG40XX H into a Bluetooth gamepad.
+No driver on the host.**
 
 <p align="center">
   <img src="brick-ui-mockups/actual/menu.png" alt="Brick Controller Devices screen" width="820">
@@ -9,16 +9,16 @@ driver on the host.**
 
 Brick Controller is a NextUI Pak. It makes the handheld appear as a standard
 HID controller to a PC, Mac, Linux/SteamOS machine, Android device or iPad.
-Pair it over Bluetooth, or connect the bottom USB-C port for the wired PC mode,
-then play.
+Pair it over Bluetooth, then play.
 
 > **Status.** The Brick is supported. The Brick Pro uses the same `tg5040`
 > package and code path, but has not yet been validated on Brick Pro hardware.
-> The RG40XX H on H700 is an experimental, community-contributed port; it is
-> built from source and installed in `Tools/h700`, and the wired PC mode is not
-> available on it. Smart Pro and `tg5050` are not supported yet: the app refuses
-> to start on them. Bluetooth supports PC, Xbox, PlayStation and Switch
-> identities; the wired mode is PC only and is still in development.
+> The RG40XX H on H700 is supported by the v1.2.0 build as a
+> community-contributed port; other H700 models are refused. Smart Pro and
+> `tg5050` are not supported yet: the app refuses to start on them. Bluetooth
+> supports PC, Xbox, PlayStation and Switch identities. The wired USB mode is
+> temporarily hidden from **Devices** in v1.2.0 while the H700/ADB backend is
+> validated; the transport remains in the source for development.
 
 > **Found a problem?** Brick Controller is a community Pak; NextUI maintainers
 > do not provide support for it. Open a bug report from the repository's
@@ -31,9 +31,8 @@ then play.
   Menu. On the Brick standard, F1/F2 work as L3/R3. On the Brick Pro, the two
   Hall-effect sticks and the real L3/R3 clicks follow the same input path; its
   Fn keys are not mapped.
-- A wired PC mode over the bottom USB-C port: the same pad appears as a
-  standard HID gamepad without pairing. It is PC only, and ADB is unavailable
-  while the wired session runs.
+- Anbernic RG40XX H support on H700: both sticks and their click buttons, digital
+  L2/R2 with full trigger travel, HDMI-aware panel blanking, and no rumble.
 - Four controller identities to choose from when pairing: PC, Xbox,
   PlayStation and Switch.
 - A **Devices** home screen that lists your paired hosts. Nothing connects
@@ -51,16 +50,15 @@ then play.
 | Devices | Pairing | Connected |
 | --- | --- | --- |
 | <img src="brick-ui-mockups/actual/menu.png" alt="Devices screen" width="260"> | <img src="brick-ui-mockups/actual/pairing.png" alt="Pairing screen" width="260"> | <img src="brick-ui-mockups/actual/controller.png" alt="Connected screen" width="260"> |
-| Your paired hosts, **Pair a new device**, **Wired connection** and **Settings**. | The name, controller type and a waiting indicator. | The host, the active profile and the sleep hint. |
+| Your paired hosts, **Pair a new device** and **Settings**. | The name, controller type and a waiting indicator. | The host, the active profile and the sleep hint. |
 
 | Controller type | Forget a host | Changing type |
 | --- | --- | --- |
 | <img src="brick-ui-mockups/actual/profile.png" alt="Controller type screen" width="260"> | <img src="brick-ui-mockups/actual/confirm.png" alt="Forget confirmation" width="260"> | <img src="brick-ui-mockups/actual/changing-type.png" alt="Changing controller type popup" width="260"> |
 | Pick the identity for the next pairing. | Forgetting always asks for confirmation. | The Bluetooth session restarts with the new identity. |
 
-The wired mode has its own waiting screen, using the Pairing layout with the
-identity and a waiting indicator, and a connected screen titled **Connected**
-with the host `PC (USB)` and `Profile PC · USB HID`.
+The development wired mode screens remain in the source, but are not reachable
+from the v1.2.0 menu.
 
 <p align="center">
   <img src="brick-ui-mockups/actual/settings.png" alt="Settings screen" width="520">
@@ -74,26 +72,24 @@ left/right changes its value, and **B** returns to Devices.
 ### What you need
 
 - A TrimUI Brick or Brick Pro running NextUI (`tg5040`), or an RG40XX H running
-  NextUI (`h700`) for the experimental build.
+  NextUI (`h700`).
 - Bluetooth enabled in NextUI. The app starts its Bluetooth session before
-  showing **Devices**, so this is required even for the wired mode. On H700, the
-  app starts Bluetooth for the session if it is off at launch.
+  showing **Devices**. On H700, the app starts Bluetooth for the session if it is
+  off at launch.
 - The `Brick Controller.pak` folder, or the release zip.
-- A USB-C **data** cable for the wired mode. Use the **bottom** USB-C port; the
-  top port is a USB host port.
+- A USB-C **data** cable only for development over ADB or SSH, or for the hidden
+  wired mode. Use the **bottom** USB-C port; the top port is a USB host port.
 
-Normal Bluetooth use needs no cable. A cable is also needed for development over
-ADB or SSH; ADB is unavailable while a wired session runs.
+Normal Bluetooth use needs no cable. ADB is unavailable only while the
+development wired session runs.
 
 ### RG40XX H on NextUI
 
-The development build supports the Anbernic RG40XX H on NextUI (`h700`). This
-is a community-contributed, experimental port; it has not been validated by the
-project maintainers. Other H700 models are outside the current hardware
-coverage. Build the Pak from source using the
-[build instructions](#build-from-source), then put it in
-`Tools/h700/Brick Controller.pak/` on the SD card. Published v1.1.0 packages
-target the TrimUI Brick.
+The v1.2.0 build supports the Anbernic RG40XX H on NextUI (`h700`). This is a
+community-contributed port; the contributor validated it on RG40XX H hardware.
+Other H700 models are outside the current hardware coverage and are refused by
+`launch.sh`. Install it in `Tools/h700/Brick Controller.pak/` on the SD card;
+v1.2.0 packages include both the `tg5040` and `h700` platforms.
 
 The app starts Bluetooth for the session if it was off on launch, and stops the
 daemons at exit without tearing down the adapter. Both sticks and their click
@@ -102,13 +98,13 @@ Rumble is currently unavailable on the RG40XX H. The built-in panel blanks after
 10 seconds with a connected host and wakes with **Menu+Start**. The app leaves
 the display alone when HDMI is connected.
 
-The wired USB mode is not available on H700: the ADB gadget backend is specific
-to `tg5040`, so **Wired connection** is hidden. Logs are written to
+The wired USB mode is temporarily hidden from **Devices** on all models in
+v1.2.0: the H700 ADB backend remains outside this release. Logs are written to
 `/mnt/SDCARD/.userdata/h700/logs/BrickController.txt`.
 
 ### Install
 
-The `v1.1.0` release is available on GitHub. If it is not in Pak Store yet, use
+The `v1.2.0` release is available on GitHub. If it is not in Pak Store yet, use
 the manual installation.
 
 #### Manual installation
@@ -126,7 +122,8 @@ the manual installation.
 5. Open **Tools → Brick Controller**.
 
 The Brick Pro uses the same `tg5040` folder and the same package as the Brick
-standard.
+standard. On the RG40XX H, use `/mnt/SDCARD/Tools/h700/Brick Controller.pak/`
+instead.
 
 ### Pair your first host
 
@@ -145,7 +142,11 @@ The type is chosen for the next pairing. An already paired host keeps the
 identity it first saw; to change it, forget the host on both sides and pair
 again.
 
-### Use the wired PC mode
+### Wired PC mode (development)
+
+The wired PC mode is temporarily hidden from **Devices** in v1.2.0 while the
+H700/ADB backend is validated. The steps below apply to a development build
+with `WIRED_MODE_ENABLED` set to `true`.
 
 1. Open **Brick Controller** so **Devices** is visible.
 2. Select **Wired connection** and press **A**.
@@ -167,17 +168,15 @@ every exit path, including a crash.
 ## Everyday use
 
 - **Devices** is the home screen. It does not connect to a host on its own.
-- **A** connects the selected host, opens **Pair a new device**, starts the
-  wired PC mode, or opens **Settings**.
+- **A** connects the selected host, opens **Pair a new device**, or opens
+  **Settings**.
 - In **Settings**, the D-pad up/down selects a line and left/right changes its
   value. **B** returns to Devices. When **Settings** is selected in Devices, the
   footer action reads **A Open** instead of **A Connect**.
 - **X** forgets the selected host after confirmation. It is only offered on a
-  host row; Pairing, the wired mode and Settings have no identity to forget.
-- **B** quits the app from the Devices screen, or leaves the wired waiting
-  screen.
-- Hold **Menu+Start** for 1 second to disconnect and return to Devices, in both
-  Bluetooth and wired modes.
+  host row; Pairing and Settings have no identity to forget.
+- **B** quits the app from the Devices screen.
+- Hold **Menu+Start** for 1 second to disconnect and return to Devices.
 - Tap **Menu** on the controller view to send Home/Guide.
 - After 10 seconds, the panel turns off. Tap **Menu+Start** once to wake it;
   this does not send the chord to the host.
@@ -200,26 +199,26 @@ name, not the internal profile name.
 On Apple hosts, use **Xbox**, **PlayStation** or **Switch**. macOS does not
 expose a generic HID gamepad to its GameController framework, so the PC profile
 does not appear in System Settings or in games built on that framework. This
-also applies to the wired PC mode.
+also applies to the development wired PC mode.
 
-The wired mode is independent of the Bluetooth profile: it always publishes the
-PC HID identity. Choosing **Wired connection** does not change the type stored
-for a host or the identity offered to the next Bluetooth pairing.
+The development wired mode, when enabled, always publishes the PC HID identity;
+it never changes the type stored for a host or the identity offered to the next
+Bluetooth pairing.
 
 ## Good to know
 
-- **Wired mode is PC only and `tg5040` only.** It uses the bottom USB-C port and
-  a data cable. On H700 the row is hidden until a dedicated ADB gadget backend
-  exists. PlayStation, Switch and Xbox controllers remain Bluetooth-only.
-- **ADB is unavailable during a wired session.** The app borrows the USB gadget
-  NextUI uses for ADB and restores it on exit. If ADB does not come back after a
-  crash, relaunch the Pak or reboot the handheld.
-- **Bluetooth must be enabled to open the app**, including for the wired mode:
-  **Devices** is part of the Bluetooth session. The daemon is handed back to
-  NextUI while USB runs and restarted on return.
-- The wired device identifies itself with a pid.codes USB identity. Development
-  builds use an official pid.codes test PID; release builds will use the
-  assigned product PID.
+- **The wired USB mode is temporarily hidden from Devices in v1.2.0** while the
+  H700/ADB backend is validated. When enabled in development, it is PC-only and
+  `tg5040`-only, uses the bottom USB-C port, and leaves PlayStation, Switch and
+  Xbox controllers Bluetooth-only.
+- **ADB is unavailable during a development wired session.** The app borrows the
+  USB gadget NextUI uses for ADB and restores it on exit. If ADB does not come
+  back after a crash, relaunch the Pak or reboot the handheld.
+- **Bluetooth must be enabled to open the app**: **Devices** is part of the
+  Bluetooth session.
+- The development wired device identifies itself with a pid.codes USB identity.
+  Development builds use an official pid.codes test PID; a release build that
+  re-enables the mode must use the assigned product PID.
 - The Smart Pro and Smart Pro S are not supported yet. On those models the app
   shows an unsupported-device screen and exits without taking over Bluetooth.
 - Rumble works in Xbox, PlayStation and Switch modes. The PC profile has no
@@ -294,14 +293,15 @@ or run:
 
 On H700, use `/mnt/SDCARD/.system/h700/etc/bluetooth/bt_init.sh start`.
 
-If ADB does not come back after a wired session, quit and relaunch the Pak. The
-launch wrapper runs the binary's `restore` subcommand, which puts the NextUI USB
-gadget and its function links back before restarting Bluetooth. A reboot is the
-fallback; it recreates the gadget from scratch.
+If ADB does not come back after a development wired session, quit and relaunch
+the Pak. The launch wrapper runs the binary's `restore` subcommand, which puts
+the NextUI USB gadget and its function links back before restarting Bluetooth.
+A reboot is the fallback; it recreates the gadget from scratch.
 
-If the host no longer sees the Brick at all after several wired sessions,
-unplug the USB-C cable and plug it back in. Some hosts do not re-enumerate after
-repeated gadget unbinds even though the Brick side is restored.
+If the host no longer sees the Brick at all after several development wired
+sessions, unplug the USB-C cable and plug it back in. Some hosts do not
+re-enumerate after repeated gadget unbinds even though the Brick side is
+restored.
 
 If the panel stays dark, press **Menu+Start** once to wake it. To restore
 NextUI's own brightness and volume settings, run:
@@ -325,17 +325,17 @@ cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo build --release --target aarch64-unknown-linux-musl -p brick-controller
-VERSION=v1.1.0 ./apps/brick-controller/deploy/package.sh
-./scripts/check-pak.sh v1.1.0
+VERSION=v1.2.0 ./apps/brick-controller/deploy/package.sh
+./scripts/check-pak.sh v1.2.0
 ```
 
 The binary is static; no Rust runtime is needed on the handheld.
 
-Development builds identify the wired device with the pid.codes test PID
-`0x1209:0x0002`. That identity is for development only: replace `USB_PRODUCT`
-in `apps/brick-controller/src/usb.rs` with the assigned product PID before
-building a release archive. Hosts cache the pair, so a release built with the
-test PID would look like a different device after the switch.
+The hidden development wired mode identifies the device with the pid.codes test
+PID `0x1209:0x0002`. That identity is for development only: replace
+`USB_PRODUCT` in `apps/brick-controller/src/usb.rs` with the assigned product
+PID before re-enabling the mode in a release. Hosts cache the pair, so a release
+built with the test PID would look like a different device after the switch.
 
 ## Credits and license
 

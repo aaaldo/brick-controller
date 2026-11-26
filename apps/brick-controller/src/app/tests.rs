@@ -6,7 +6,7 @@
 //! `ui/preview.rs`.
 
 use super::session::SessionOutcome;
-use super::settings::{Preferences, RumbleStrength, Settings};
+use super::settings::{wired_enabled, Preferences, RumbleStrength, Settings};
 use super::view_model::{
     changing_type_modal, move_cursor, nav_dir, returning_to_devices_modal, view_for,
     wired_controller, wired_waiting, Dir, MenuRow, Screen, SettingRow,
@@ -15,6 +15,7 @@ use super::{start_after_switch, StartScreen};
 use crate::bluetooth::{bluez, Address};
 use crate::i18n::Lang;
 use crate::input::{DpadMode, Hat};
+use crate::platform::model::Model;
 use crate::profiles::Profile;
 use crate::ui::View;
 use std::collections::HashMap;
@@ -86,6 +87,12 @@ fn the_wired_row_is_hidden_when_the_model_has_no_backend() {
     let rows = settings.rows();
     assert!(!rows.contains(&MenuRow::Wired));
     assert_eq!(rows.last(), Some(&MenuRow::Settings));
+}
+
+#[test]
+fn the_wired_row_is_temporarily_hidden_for_v1_2_0() {
+    assert!(!wired_enabled(Model::Brick));
+    assert!(!wired_enabled(Model::Rg40xxH));
 }
 
 #[test]

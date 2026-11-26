@@ -34,28 +34,7 @@ fn preview_menu_rows(linked: bool) -> Vec<Row> {
         Row::new("iPhone", format!("Xbox · {offline}"), false),
     ];
     rows.push(Row::new(tr(Lang::En, Key::PairNew), "PC", false));
-    rows.push(Row::new(
-        tr(Lang::En, Key::WiredConnection),
-        tr(Lang::En, Key::WiredDetail),
-        false,
-    ));
     rows.push(Row::new(tr(Lang::En, Key::Settings), "", false));
-    rows
-}
-
-/// The menu with the wired row selected, to check that `X Forget` disappears
-/// when the selection has no stored host.
-fn preview_wired_rows() -> Vec<Row> {
-    let mut rows = preview_menu_rows(true);
-    for row in &mut rows {
-        row.selected = false;
-    }
-    if let Some(wired) = rows
-        .iter_mut()
-        .find(|row| row.label == tr(Lang::En, Key::WiredConnection))
-    {
-        wired.selected = true;
-    }
     rows
 }
 
@@ -125,15 +104,6 @@ fn preview_every_screen() {
             View::Menu {
                 rows: preview_menu_rows(false),
                 can_forget: true,
-                open: false,
-            },
-            preview_status(true),
-        ),
-        (
-            "menu-wired",
-            View::Menu {
-                rows: preview_wired_rows(),
-                can_forget: false,
                 open: false,
             },
             preview_status(true),

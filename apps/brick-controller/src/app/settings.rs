@@ -281,17 +281,29 @@ pub struct Settings {
     /// The identity a new host would pair with, when no host is known yet.
     pub(crate) pairing: Profile,
     pub(crate) preferences: Preferences,
-    /// Whether this build exposes the wired USB mode. The H700 backend is not
-    /// implemented, so the row is hidden instead of leading to a failed
-    /// `g1`/ADB takeover.
+    /// Whether this build exposes the wired USB mode. It is temporarily off
+    /// for v1.2.0 while the H700/ADB backend is validated; the transport and
+    /// screens stay in the tree.
     pub(crate) wired: bool,
     pub(crate) error: Option<String>,
+}
+
+/// The wired USB mode is temporarily hidden from Devices in v1.2.0 while the
+/// H700/ADB backend is validated. Set this to true to expose the row again.
+const WIRED_MODE_ENABLED: bool = false;
+
+/// Whether Devices should show the wired USB row on `model`.
+///
+/// Kept as a function so the temporary release gate is covered by a test and
+/// the H700 exclusion stays in one place.
+pub(crate) fn wired_enabled(model: Model) -> bool {
+    WIRED_MODE_ENABLED && model != Model::Rg40xxH
 }
 
 impl Settings {
     pub fn load(bus: &bluez::Bus, pairing: Profile) -> Self {
         let preferences = Preferences::load();
-        let wired = Model::current() != Model::Rg40xxH;
+        let wired = wired_enabled(Model::current());
         match bus.paired_hosts() {
             Ok(hosts) => {
                 eprintln!("menu: {} paired host(s)", hosts.len());
@@ -318,8 +330,8 @@ impl Settings {
         }
     }
 
-    /// Devices always ends with pairing, the wired PC mode when this model has
-    /// a backend for it, and Settings, even while a host is connected:
+    /// Devices always ends with pairing and Settings, and includes the wired
+    /// PC mode only when this build exposes it, even while a host is connected:
     /// connecting, pairing, switching transport and preferences are explicit
     /// choices on this screen.
     pub fn rows(&self) -> Vec<MenuRow> {

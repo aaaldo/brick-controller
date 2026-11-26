@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Check pak.json and the Pak Store archive before a release.
 #
-#   ./scripts/check-pak.sh v1.1.0
+#   ./scripts/check-pak.sh v1.2.0
 #
 # Run package.sh first. This script only checks the metadata and archive layout
 # the Pak Store reads; it does not replace the firmware tests.
@@ -54,7 +54,7 @@ REPO_URL=$(jq -r '.repo_url' "$PAK_JSON")
 case "$PAK_VERSION" in
     v[0-9]*) ;;
     *)
-        echo "pak.json: version must start with v, for example v1.1.0" >&2
+        echo "pak.json: version must start with v, for example v1.2.0" >&2
         exit 1
         ;;
 esac
@@ -71,8 +71,8 @@ case "$REPO_URL" in
         exit 1
         ;;
 esac
-jq -e '.platforms | index("tg5040") != null' "$PAK_JSON" >/dev/null || {
-    echo "pak.json: platforms must include tg5040" >&2
+jq -e '.platforms | index("tg5040") != null and index("h700") != null' "$PAK_JSON" >/dev/null || {
+    echo "pak.json: platforms must include tg5040 and h700" >&2
     exit 1
 }
 if [ -n "$VERSION" ] && [ "$PAK_VERSION" != "$VERSION" ]; then
