@@ -13,7 +13,7 @@
 //! the device they are not: tested on a PC, pushing right moved ABS_RX.
 //!
 //! The H700 reports a different layout: its face buttons are swapped, the
-//! left stick is on ABS_Z/ABS_RZ, and L2/R2 are digital buttons. Those events
+//! stick axes use different codes, and L2/R2 are digital buttons. Those events
 //! are translated by `input_h700` into the normalized codes below before
 //! `Mapper` sees them, so the reader and the profiles stay shared.
 //!
@@ -377,9 +377,9 @@ mod tests {
         let mut mapper = Mapper::default();
         for (kind, code, value) in [
             (EV_ABS, ABS_Z, 32767),
-            (EV_ABS, ABS_RZ, -32768),
             (EV_ABS, ABS_RX, -32768),
             (EV_ABS, ABS_RY, 32767),
+            (EV_ABS, ABS_RZ, -32768),
             (EV_KEY, 312, 1),
             (EV_KEY, 311, 1),
             (EV_KEY, 314, 1),
@@ -388,7 +388,7 @@ mod tests {
             let (kind, code, value) = crate::platform::input_h700::normalize(kind, code, value);
             mapper.apply(kind, code, value);
         }
-        assert_eq!(mapper.state.sticks, [255, 0, 0, 255]);
+        assert_eq!(mapper.state.sticks, [255, 0, 255, 0]);
         assert_eq!(mapper.state.triggers, [255, 255]);
         assert!(mapper.take_combo_tap());
     }

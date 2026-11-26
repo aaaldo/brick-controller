@@ -4,8 +4,8 @@
 //! H700 (Anbernic RG40XX H) evdev translation.
 //!
 //! The H700 kernel does not use the Brick's positional layout: the face
-//! buttons are swapped, the left stick is reported on `ABS_Z`/`ABS_RZ`, and
-//! L2/R2 are digital buttons rather than analogue axes. This module translates
+//! buttons are swapped, the sticks report X/Y on `ABS_Z`/`ABS_RX` and
+//! `ABS_RY`/`ABS_RZ`, and L2/R2 are digital buttons. This module translates
 //! the codes measured on an RG40XX H into the normalized Brick layout, so the
 //! shared `Mapper` in `input_trimui` and every controller profile stay
 //! unchanged.
@@ -34,6 +34,11 @@ const H700_L3: u16 = 313;
 const H700_L2: u16 = 314;
 const H700_R2: u16 = 315;
 const H700_R3: u16 = 316;
+
+const H700_LEFT_X: u16 = ABS_Z;
+const H700_LEFT_Y: u16 = ABS_RX;
+const H700_RIGHT_X: u16 = ABS_RY;
+const H700_RIGHT_Y: u16 = ABS_RZ;
 
 /// Find the `ANBERNIC-keys` event node.
 ///
@@ -67,24 +72,24 @@ pub(crate) fn normalize(kind: u16, code: u16, value: i32) -> (u16, u16, i32) {
         (EV_KEY, H700_L2) => (EV_ABS, ABS_Z, if value == 0 { 0 } else { 255 }),
         (EV_KEY, H700_R2) => (EV_ABS, ABS_RZ, if value == 0 { 0 } else { 255 }),
         (EV_KEY, H700_R3) => (EV_KEY, BTN_THUMBR, value),
-        (EV_ABS, ABS_Z) => (EV_ABS, ABS_X, value),
-        (EV_ABS, ABS_RZ) => (EV_ABS, ABS_Y, value),
+        (EV_ABS, H700_LEFT_X) => (EV_ABS, ABS_X, value),
+        (EV_ABS, H700_LEFT_Y) => (EV_ABS, ABS_Y, value),
+        (EV_ABS, H700_RIGHT_X) => (EV_ABS, ABS_RX, value),
+        (EV_ABS, H700_RIGHT_Y) => (EV_ABS, ABS_RY, value),
         _ => (kind, code, value),
     }
 }
 
 /// The evdev axis whose range fills `ranges[index]` on H700.
 ///
-/// `Mapper` keeps six ranges: left X/Y, left trigger, right X/Y, right
-/// trigger. The H700 reports the left stick on Z/RZ, so slots 0 and 1 read
-/// their ranges from those axes; slots 2 and 5 are the digital triggers and
-/// keep the default 0..=255 range.
+/// Each stick slot reads its range from the same physical axis that feeds it.
+/// Slots 2 and 5 are digital triggers and keep the default 0..=255 range.
 pub(crate) fn axis_for_slot(index: usize) -> Option<u16> {
     match index {
-        0 => Some(ABS_Z),
-        1 => Some(ABS_RZ),
-        3 => Some(ABS_RX),
-        4 => Some(ABS_RY),
+        0 => Some(H700_LEFT_X),
+        1 => Some(H700_LEFT_Y),
+        3 => Some(H700_RIGHT_X),
+        4 => Some(H700_RIGHT_Y),
         _ => None,
     }
 }
@@ -121,15 +126,11 @@ mod tests {
     }
 
     #[test]
-    fn the_left_stick_is_on_the_z_axes_and_the_right_stick_is_unchanged() {
-        assert_eq!(normalize(EV_ABS, ABS_Z, 1234), (EV_ABS, ABS_X, 1234));
-        assert_eq!(normalize(EV_ABS, ABS_RZ, -1234), (EV_ABS, ABS_Y, -1234));
-        assert_eq!(
-            normalize(EV_ABS, ABS_RX, 42),
-            (EV_ABS, ABS_RX, 42),
-            "the right stick keeps its evdev axes"
-        );
-        assert_eq!(normalize(EV_ABS, ABS_RY, -42), (EV_ABS, ABS_RY, -42));
+    fn physical_stick_axes_map_to_their_normalized_axes() {
+        assert_eq!(normalize(EV_ABS, ABS_Z, -4096), (EV_ABS, ABS_X, -4096));
+        assert_eq!(normalize(EV_ABS, ABS_RX, -4096), (EV_ABS, ABS_Y, -4096));
+        assert_eq!(normalize(EV_ABS, ABS_RY, 4096), (EV_ABS, ABS_RX, 4096));
+        assert_eq!(normalize(EV_ABS, ABS_RZ, -4096), (EV_ABS, ABS_RY, -4096));
     }
 
     #[test]
@@ -141,9 +142,9 @@ mod tests {
     #[test]
     fn stick_ranges_come_from_the_physical_axes() {
         assert_eq!(axis_for_slot(0), Some(ABS_Z));
-        assert_eq!(axis_for_slot(1), Some(ABS_RZ));
-        assert_eq!(axis_for_slot(3), Some(ABS_RX));
-        assert_eq!(axis_for_slot(4), Some(ABS_RY));
+        assert_eq!(axis_for_slot(1), Some(ABS_RX));
+        assert_eq!(axis_for_slot(3), Some(ABS_RY));
+        assert_eq!(axis_for_slot(4), Some(ABS_RZ));
         assert_eq!(axis_for_slot(2), None, "the left trigger keeps 0..=255");
         assert_eq!(axis_for_slot(5), None, "the right trigger keeps 0..=255");
     }
