@@ -140,6 +140,7 @@ pub fn restore_system_daemon() {
 
 pub struct Daemon {
     child: Child,
+    restore_on_drop: bool,
 }
 
 impl Daemon {
@@ -149,19 +150,15 @@ impl Daemon {
         if !std::path::Path::new("/sys/class/bluetooth/hci0").exists() {
             return Err(BLUETOOTH_OFF.into());
         }
-        // The marker is written before anything is stopped: a crash between
-        // these lines must still tell `launch.sh` whether the system daemon was
-        // running when the app took over.
-        let was_running = daemon_running();
-        // The wrapper may have started Bluetooth only for this session (H700
-        // with Bluetooth off at launch). In that case restore must stop our
-        // daemon but must not start NextUI's.
-        let wrapper_started = std::env::var("BRICK_CONTROLLER_BT_STARTED")
-            .map(|value| value == "1")
-            .unwrap_or(false);
-        let restore_on_exit = was_running && !wrapper_started;
-        std::fs::write(MARKER, if restore_on_exit { "1" } else { "0" })
-            .map_err(|e| e.to_string())?;
+        // Keep the original Bluetooth state across profile changes so the
+        // launcher can recover it even if the next session fails to start.
+        if !std::path::Path::new(MARKER).exists() {
+            let wrapper_started =
+                std::env::var("BRICK_CONTROLLER_BT_STARTED").is_ok_and(|value| value == "1");
+            let restore_on_exit = daemon_running() && !wrapper_started;
+            std::fs::write(MARKER, if restore_on_exit { "1" } else { "0" })
+                .map_err(|e| e.to_string())?;
+        }
         stop_all_daemons();
         // Peripheral, gamepad. The name is set here too so even the very first
         // inquiry answer carries it.
@@ -189,7 +186,16 @@ impl Daemon {
             .stderr(Stdio::null())
             .spawn()
             .map_err(|e| format!("could not start bluetoothd: {e}"))?;
-        Ok(Self { child })
+        Ok(Self {
+            child,
+            restore_on_drop: true,
+        })
+    }
+
+    /// Starting NextUI's daemon between profiles can briefly advertise its
+    /// generic Device ID under the previous profile's Bluetooth alias.
+    pub fn switch_profile(mut self) {
+        self.restore_on_drop = false;
     }
 }
 
@@ -199,7 +205,9 @@ impl Drop for Daemon {
         // still holds the adapter makes the new one miss `hci0`.
         let _ = self.child.kill();
         let _ = self.child.wait();
-        restore_system_daemon();
+        if self.restore_on_drop {
+            restore_system_daemon();
+        }
     }
 }
 

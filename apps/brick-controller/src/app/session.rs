@@ -1101,7 +1101,11 @@ pub(crate) fn session(
     drop(link);
     let _ = bus.set_discoverable(false);
     drop(bus);
-    drop(daemon);
+    if matches!(outcome, SessionOutcome::SwitchProfile { .. }) {
+        daemon.switch_profile();
+    } else {
+        drop(daemon);
+    }
     Ok(outcome)
 }
 
